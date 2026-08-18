@@ -46,6 +46,66 @@ Step **G** sits outside this chain. It does not help build that file; it rebuild
 the finished scores on a single occupation classification, trading detail for a
 partition that cannot move at 2020.
 
+## How the steps depend on each other
+
+The table above is the reading order. The dependency graph is not the same shape:
+A feeds sideways into every aggregation rather than into the next step, and the one
+edge that cannot be reordered is C into D.
+
+```mermaid
+flowchart TB
+  subgraph inputs["raw inputs - not in this repo, hosted separately"]
+    OEWS["OEWS national<br/>M2024 - M2018"]
+    XW["BLS SOC 2010 to 2018<br/>Census code lists<br/>ACS-PUMS-SIPP list"]
+    OVR["collapse_overrides<br/>2010 - 2018<br/>hand-maintained"]
+    CPSX["IPUMS CPS extract"]
+    MEAS["Felten AIOE<br/>Eisfeldt ESTZ<br/>Eloundou beta"]
+  end
+
+  A["A - employment weights<br/>emp_soc2018 - emp_soc2010"]
+  B["B - code plumbing<br/>soc-soc, soc-det, det-det"]
+  C["C - CPS occ universe<br/>codes CPS really publishes"]
+  D["D - detailed to public-use<br/>det2018_pu2018 - det2010_pu2010"]
+  E["E - carry each measure<br/>3 measures x 2 vintages"]
+  F["F - stack, bin, label, report"]
+  G["G - re-key on OCC2010<br/>one classification, all years"]
+
+  OUT1(["ai_exposure_cps.dta<br/>occ_vintage x occ<br/>484 + 526 codes"])
+  OUT2(["ai_exposure_occ2010.dta<br/>occ2010<br/>473 categories"])
+
+  OEWS --> A
+  XW --> B
+  XW --> D
+  OVR --> D
+  CPSX --> C
+  MEAS --> E
+
+  C ==>|"builds the 2010 collapse map,<br/>so C must run before D"| D
+  B --> E
+  D --> E
+  A -.->|"weights every<br/>many-to-one hop"| E
+  E --> F
+  C -->|"universe check<br/>and emp_share"| F
+  F --> OUT1
+  OUT1 --> G
+  CPSX -.->|"occ to occ2010 rule,<br/>read off CPS 2019 and earlier"| G
+  G --> OUT2
+```
+
+Three edges are worth reading closely:
+
+- **Thick, C into D.** Not a data handoff but a construction dependency: D *builds*
+  the 2010 collapse map against the observed CPS code list. Swap the order and the
+  map silently changes.
+- **Dashed, into E and G.** Side inputs, not stages. A supplies the weights consumed
+  at every many-to-one hop inside E; the CPS extract is read a second time in G to
+  recover IPUMS's own `occ -> occ2010` collapse.
+- **C into F as well as D.** The same file does double duty: it constructs the map in
+  D, then supplies the employment shares the coverage report needs in F.
+
+Note also that G consumes the *finished* `ai_exposure_cps.dta`, and only its
+2010-vintage rows. Nothing from the 2018 vintage reaches the harmonized file.
+
 ---
 
 ## A. OEWS employment weights
