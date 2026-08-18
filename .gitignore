@@ -1,0 +1,45 @@
+#==============================================================================#
+# Whitelist .gitignore: ignore everything, then re-admit the tracked set.
+#
+# This repo carries the build script, the README, the data/ folder skeleton, and
+# the small derived outputs -- nothing else. The research-template AI
+# infrastructure (Infrastructure/, CLAUDE.md, AGENTS.md, PROJECT.md, Makefile,
+# .claude/, .codex/, .agents/) stays local, as do the raw inputs, which are
+# hosted separately: see README.md for how to obtain them.
+#
+# To track a new file you must un-ignore it explicitly below. That is the point:
+# data/raw/cps/ holds 1.2 GB Stata extracts and GitHub rejects any file over
+# 100 MB, so nothing gets committed here by accident.
+#==============================================================================#
+
+# 1. Ignore every file.
+*
+
+# 2. But descend into directories, so the re-admits below can be reached.
+!*/
+
+# 3. Re-admit the tracked set.
+!/.gitignore
+!/.gitattributes
+!/README.md
+
+# build script
+!/code/0_config.do
+!/code/01_build_cps_exposure.do
+
+# folder skeleton under data/ -- the pipeline writes into these, so a fresh
+# clone needs them to exist before it can run
+!/data/**/.gitkeep
+
+# derived outputs (small; regenerable from code/01_build_cps_exposure.do)
+!/data/processed/ai_exposure_cps.dta
+!/data/processed/ai_exposure_cps.csv
+!/data/processed/ai_exposure_occ2010.dta
+
+# 4. Belt and braces -- never tracked, whatever else changes above.
+.DS_Store
+
+# Stray empty repo GitHub Desktop created inside this one (safe to delete).
+# Named explicitly because git treats an embedded repo as a submodule-shaped
+# entry that rule 2 would otherwise let through.
+/ai-cps-exposure/

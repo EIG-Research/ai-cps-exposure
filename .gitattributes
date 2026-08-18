@@ -1,0 +1,5 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Stata datasets are binary -- never newline-normalize them
+*.dta binary
