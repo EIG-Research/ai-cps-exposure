@@ -262,38 +262,3 @@ The test that detects a coding artifact is the December→January step in each b
 Normal years land at 0.11–0.44pp; a coding break shows up as several times that, at exactly `2019m12 → 2020m1`.
 Person-level links via `cpsidp` sharpen it further, since a worker whose job did not change should not change bin.
 
-
-mermaid
-flowchart TB
-  OEWS["OEWS national<br/>M2024 · M2018"]
-  BLS["BLS SOC 2010→2018"]
-  CEN["Census code lists<br/>2010 · 2018 · ACS-PUMS"]
-  CPSX["IPUMS CPS extract"]
-  OVR["collapse_overrides<br/>2010 · 2018"]
-  MEAS["Felten · Eisfeldt · Eloundou"]
-
-  A["<b>A</b> employment weights<br/>emp_soc2018 · emp_soc2010"]
-  B["<b>B</b> code plumbing<br/>soc↔soc · soc→det · det→det"]
-  C["<b>C</b> CPS occ universe<br/>codes CPS really publishes"]
-  D["<b>D</b> detailed → public-use<br/>det2018_pu2018 · det2010_pu2010"]
-  E["<b>E</b> carry each measure<br/>3 measures × 2 vintages"]
-  F["<b>F</b> stack · bin · label<br/>ai_exposure_cps.dta"]
-  G["<b>G</b> harmonize on OCC2010<br/>ai_exposure_occ2010.dta"]
-
-  OEWS --> A
-  BLS --> B
-  CEN --> B
-  CEN --> D
-  OVR --> D
-  CPSX --> C
-  MEAS --> E
-
-  C ==>|"builds the 2010<br/>collapse ma
-  B --> E
-  D --> E
-  A -.->|"weights every<br/>many→one hop"| E
-  E --> F
-  C -->|"universe check<br/>+ emp_share"| F
-  F --> G
-  CPSX -.->|"occ→occ2010 rule,<br/>learned from ≤2019"| G
-  
