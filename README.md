@@ -30,8 +30,23 @@ The two files answer different questions.
 
 **Why the `OCC2010` version exists.**
 Bins in the per-vintage file are defined over two different code universes, so the January 2020 recoding moves employment across bins with nobody changing jobs.
-Person-linked records show **11.05%** of workers changing bin at the boundary against **5.37%** in a normal December→January, a **+0.70pp** drift into the top bin, and a largest-monthly-bin-step of **1.65pp**.
-On `OCC2010` — one classification scheme, bins cut once — the same diagnostics read **5.84%**, **+0.09pp**, and **0.52pp**, which is an ordinary month.
+`code/02_boundary_diagnostic.do` measures it, per measure and under both keyings, from `cpsidp`-linked adjacent months (4.7M links, IPUMS month-to-month weights).
+Every measure churns far more at the boundary than in a control December→January, and the sharpest version restricts to workers who report the **same employer** as last month — people who should not change bin at all:
+
+| measure | churn, vintage | churn, `OCC2010` | stayers, vintage | stayers, `OCC2010` | top-bin drift, vintage |
+|---|---|---|---|---|---|
+| `aioe` | 7.99% | 5.50% | 5.58% | 2.83% | −0.34pp |
+| `estz_total` | 11.72% | 5.72% | 9.10% | 2.90% | +2.30pp |
+| `estz_core` | 9.29% | 6.07% | 6.45% | 3.11% | −0.03pp |
+| `estz_supp` | 12.56% | 5.97% | 9.94% | 3.03% | +0.22pp |
+| `gpt4_beta` | 10.92% | 5.51% | 8.24% | 2.71% | +0.68pp |
+| `human_beta` | 10.04% | 5.78% | 7.62% | 3.01% | +0.23pp |
+| `ai_applic` | 12.18% | 5.75% | 9.88% | 2.94% | +0.07pp |
+
+Control December→January steps run 4.8–5.3% for all links and 2.1–2.3% for stayers, under either keying, and control drift never exceeds 0.07pp.
+
+Read the stayer columns first: under the per-vintage keying, 5.6–9.9% of same-employer workers change bin at the boundary against a 2.1–2.3% control, i.e. 2.6× to 4.4× a normal month. Keying on `OCC2010` cuts that to 2.7–3.1%, near the control.
+The residual gap is real occupation change plus IPUMS's own back-coding, not the scheme break.
 Any statistic that spans the boundary inherits the artifact: a monthly series, an event study around 2020, a difference between pre- and post-2020 periods, or a person-level transition rate.
 The cost is 473 categories instead of 525, and post-2020 `OCC2010` values are IPUMS back-codes.
 
@@ -294,7 +309,8 @@ Two things to know before using it:
   The build prints all three counts, because they are different questions — only **one** category is absent from the collapsed score file altogether, and quoting that number as if it were the coverage gap is how an earlier version of this line came to claim "0.00% of employment".
   One 2010-vintage `occ` code has no `occ2010` mapping and drops out — it appears as `_mh == 1` in the log.
 
-What it buys, from the person-linked diagnostic: **5.84%** of workers change bin at the boundary against **5.37%** in a control December→January, with **+0.09pp** net drift, and the largest monthly bin step falls from **1.65pp** to **0.52pp**.
+What it buys, from `code/02_boundary_diagnostic.do`: boundary bin churn falls from 8.0–12.6% to 5.5–6.1% depending on the measure, against a control of 4.8–5.3%, and among same-employer stayers from 5.6–9.9% to 2.7–3.1% against a 2.1–2.3% control.
+Net top-bin drift, which ranges from −0.34pp to +2.30pp across measures under the per-vintage keying, falls to at most 0.30pp.
 The cost is 473 categories instead of 525.
 
 ---
@@ -316,10 +332,11 @@ No worker is ever randomly reassigned to a new code, so there is no spurious occ
 Coverage is ~99% of employment in each vintage; Eisfeldt covers all 840 SOC codes.
 
 **Bin membership shifts at the 2020 recoding.** Because the two vintages bin workers on different code universes (483 codes, then 525), the January 2020 recoding moves employment across bins with nobody changing job.
-Person-linked CPS records show **11.05%** of workers changing bin at the boundary versus **5.37%** in a normal December→January, with a **+0.70pp** net drift into the top bin.
+Person-linked CPS records show **8.0–12.6%** of workers changing bin at the boundary versus **4.8–5.3%** in a normal December→January, depending on the measure, and **5.6–9.9%** of *same-employer* workers against a **2.1–2.3%** control.
+Net top-bin drift is measure-specific and signed in both directions — **+2.30pp** for `estz_total`, **−0.34pp** for `aioe` — so there is no single number for "the drift", and a specification that leans on aggregate direction needs its own measure checked.
 Aggregates that span the moving boundary — top-two-bins combined, or the continuous mean — hide this almost entirely, so check individual bins.
 
-*If this matters for your specification,* use the harmonized file from step G. `ai_exposure_occ2010.dta` keys on IPUMS `OCC2010`, one classification for all years, which gives 5.84% churn and +0.09pp drift — i.e. a normal month.
+*If this matters for your specification,* use the harmonized file from step G. `ai_exposure_occ2010.dta` keys on IPUMS `OCC2010`, one classification for all years, which brings churn to 5.5–6.1% against a 4.8–5.3% control and drift to 0.30pp or less.
 Costs occupational detail (473 categories instead of 525).
 Crosswalk-derived common partitions do **not** fix it — the CPS recoding does not respect crosswalk boundaries.
 
@@ -334,6 +351,8 @@ Its **−0.4pp** break across 2020 is the smallest of any measure in the file.
 ## Suggested diagnostic
 
 The test that detects a coding artifact is the December→January step in each bin's employment share, **with non-boundary Januaries as the control**.
-Normal years land at 0.11–0.44pp; a coding break shows up as several times that, at exactly `2019m12 → 2020m1`.
+That test is now `code/02_boundary_diagnostic.do`, so run it rather than reconstructing it — and note what it shows: the cross-sectional monthly step is the *weakest* of the three tests.
+For `aioe` the boundary step is 0.14pp while the largest step elsewhere in the series is 2.07pp, so the break is invisible in that statistic even though person-linked churn is plainly elevated.
+Only `estz_total` has its largest monthly step at the boundary (2.48pp against 1.80pp elsewhere).
 Person-level links via `cpsidp` sharpen it further, since a worker whose job did not change should not change bin.
 

@@ -1022,17 +1022,18 @@ if !_rc {
 *==============================================================================*
 * HARMONIZED occ2010 EXPOSURE FILE
 *
-* Fixes the 2019m12->2020m1 artifact. The per-vintage file bins workers on two
-* different code universes (484 codes, then 526), so the Jan-2020 recoding moves
-* employment across bins with nobody changing job. Person-linked CPS records
-* show 11.05% of workers changing bin at the boundary vs 5.37% in a normal
-* Dec->Jan, with a +0.70pp net drift into bin 5.
+* Addresses the 2019m12->2020m1 artifact. The per-vintage file bins workers on
+* two different code universes (483 codes, then 525), so the Jan-2020 recoding
+* moves employment across bins with nobody changing job.
 *
-* Keying on IPUMS OCC2010 -- one classification, all years -- gives 5.84% churn
-* and +0.09pp drift, i.e. a normal month. Max monthly bin step falls 1.65 ->
-* 0.52pp, inside the range seen in non-boundary Januaries.
+* MEASURED, not asserted: code/02_boundary_diagnostic.do reports boundary bin
+* churn of 8.0-12.6% by measure against a 4.8-5.3% control December->January,
+* and 5.6-9.9% among workers reporting the SAME employer as last month against
+* a 2.1-2.3% control. Keying on OCC2010 brings those to 5.5-6.1% and 2.7-3.1%.
+* Net top-bin drift is measure-specific and signed both ways (+2.30pp for
+* estz_total, -0.34pp for aioe), so do not quote a single drift number.
 *
-* Cost: 474 categories instead of 526, and post-2020 OCC2010 values are IPUMS
+* Cost: 473 categories instead of 525, and post-2020 OCC2010 values are IPUMS
 * back-codes. That is the trade -- a consistent rule beats a scheme change.
 *==============================================================================*
 
@@ -1139,8 +1140,12 @@ compress
 label data "AI exposure on IPUMS OCC2010 -- single classification, no 2020 break"
 notes drop _dta
 notes _dta : Keyed on IPUMS OCC2010 so occupation coding is constant across the
-notes _dta : Jan-2020 CPS recoding. Boundary bin step 0.52pp vs 1.65pp on the
-notes _dta : per-vintage file; person-linked bin churn 5.84% vs 5.37% control.
+notes _dta : Jan-2020 CPS recoding. Boundary bin churn is 5.5-6.1% by measure
+notes _dta : against a 4.8-5.3% control Dec->Jan, and 2.7-3.1% among same-
+notes _dta : employer workers against a 2.1-2.3% control; on the per-vintage
+notes _dta : file the same figures are 8.0-12.6% and 5.6-9.9%. Reproduce with
+notes _dta : code/02_boundary_diagnostic.do -> output/tables/boundary_diagnostic.csv
+notes _dta : Sample: civilian employed (empstat 10/12), CPS $cps_yr_min-$cps_yr_max.
 save "$prcd_data/ai_exposure_occ2010.dta", replace
 di as result "   wrote ai_exposure_occ2010.dta: `=_N' occ2010 categories"
 
