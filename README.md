@@ -289,7 +289,9 @@ Two things to know before using it:
 - **Every score comes from the 2010-vintage build.** The 2018-vintage columns are not used at all.
   For 2020+ observations IPUMS back-codes `occ2010`, and the worker inherits the 2010-basis score.
   That inheritance is exactly what buys the constant partition.
-- **Coverage:** 472 of 473 `occ2010` categories carry a score, and the one gap is 0.00% of employment.
+- **Coverage:** 465 of 473 `occ2010` categories carry at least one score; the 8 that carry none hold **0.58%** of employment.
+  Per measure the gap is wider than that: `aioe` is missing for 11 categories (0.76% of employment) and `ai_applic` for 9 (1.33%), the rest for 8 (0.58%).
+  The build prints all three counts, because they are different questions — only **one** category is absent from the collapsed score file altogether, and quoting that number as if it were the coverage gap is how an earlier version of this line came to claim "0.00% of employment".
   One 2010-vintage `occ` code has no `occ2010` mapping and drops out — it appears as `_mh == 1` in the log.
 
 What it buys, from the person-linked diagnostic: **5.84%** of workers change bin at the boundary against **5.37%** in a control December→January, with **+0.09pp** net drift, and the largest monthly bin step falls from **1.65pp** to **0.52pp**.

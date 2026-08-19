@@ -1107,11 +1107,33 @@ foreach s of local scorevars {
 
 * --- G5. attach the universe, report coverage, save -------------------------
 merge 1:1 occ2010 using "$prcd_exp/cps_occ2010_universe.dta",  keep(match using) generate(_mu)
+
+* Two different things get called "no score" and they are not the same number.
+* (i) categories absent from the collapsed score file entirely (_mu == 2), and
+* (ii) categories that are present but whose score is missing -- which is what a
+* reader of the documentation means. Report BOTH: (i) alone understates the gap
+* by an order of magnitude, and quoting it as if it were (ii) is how the README
+* came to claim "one category, 0.00% of employment".
 quietly count if _mu == 2
-local nogap = r(N)
+local norow = r(N)
 quietly summ emp_share_pooled if _mu == 2
-di as result "   occ2010 categories with no score: `nogap' (" %5.2f `=100*r(sum)' "% of employment)"
+di as result "   occ2010 categories missing from the score file: `norow' (" %5.2f `=100*r(sum)' "% of employment)"
 drop _mu
+
+egen byte _anyscore = rownonmiss(`scorevars')
+quietly count if _anyscore == 0
+local noany = r(N)
+quietly summ emp_share_pooled if _anyscore == 0
+di as result "   occ2010 categories carrying NO score at all:     `noany' (" %5.2f `=100*r(sum)' "% of employment)"
+drop _anyscore
+
+di as txt "   per-measure gaps (categories with a missing score):"
+foreach s of local scorevars {
+    quietly count if missing(`s')
+    local n = r(N)
+    quietly summ emp_share_pooled if missing(`s')
+    di as result "     " %-12s "`s'" %5.0f `n' " of `=_N'  (" %5.2f `=100*r(sum)' "% of employment)"
+}
 label var occ2010 "IPUMS OCC2010 (harmonized, all years)"
 compress
 label data "AI exposure on IPUMS OCC2010 -- single classification, no 2020 break"
