@@ -1,18 +1,60 @@
-# Building the AI-exposure measures
+# Building CPS-ready AI-exposure measures
 
 Carries published AI-exposure measures from their native occupation coding onto the occupation codes that actually appear in CPS microdata, and emits one dataset that merges straight onto a CPS extract.
 
-**Output:** `data/processed/ai_exposure_cps.dta` (+ `.csv`), keyed on `occ_vintage` × `occ`.
+This improves upon the work in [AI and Jobs: The Final Word (Until the Next One)](https://eig.org/ai-and-jobs-the-final-word/)
 
+**Output:** 
+
+`data/processed/ai_exposure_cps.dta` (+ `.csv`), keyed on `occ_vintage` × `occ`.
+
+To use:
 ```stata
 gen occ_vintage = cond(year >= 2020, 2018, 2010)
 merge m:1 occ_vintage occ using "$prcd_data/ai_exposure_cps.dta"
 ```
 
-A second output, `ai_exposure_occ2010.dta`, keys on IPUMS `OCC2010` instead — one occupation classification for all years, at the cost of detail.
-See **G**.
+`data/processed/ai_exposure_occ2010.dta`, keyed on IPUMS `OCC2010`. Contains one occupation classification for all years, at the cost of detail. See **G**.
+
+```stata
+merge m:1 occ2010 using "$prcd_data/ai_exposure_occ2010.dta"
+```
 
 ---
+
+## Why there are two ways to match to CPS
+
+The two files answer different questions.
+`ai_exposure_cps.dta` carries the most occupational detail the CPS supports, on the codes it actually published in each year — 484 codes before 2020, 526 from 2020 on.
+`ai_exposure_occ2010.dta` gives up detail to hold the classification scheme constant.
+
+**Why the `OCC2010` version exists.**
+Bins in the per-vintage file are defined over two different code universes, so the January 2020 recoding moves employment across bins with nobody changing jobs.
+Person-linked records show **11.05%** of workers changing bin at the boundary against **5.37%** in a normal December→January, a **+0.70pp** drift into the top bin, and a largest-monthly-bin-step of **1.65pp**.
+On `OCC2010` — one classification scheme, bins cut once — the same diagnostics read **5.84%**, **+0.09pp**, and **0.52pp**, which is an ordinary month.
+Any statistic that spans the boundary inherits the artifact: a monthly series, an event study around 2020, a difference between pre- and post-2020 periods, or a person-level transition rate.
+The cost is 473 categories instead of 526, and post-2020 `OCC2010` values are IPUMS back-codes.
+
+**Why we don't push the 2018 vintage backwards.**
+The obvious alternative is to recode pre-2020 records onto 2018-basis codes and use the 2018-vintage scores for every year.
+That direction requires *splitting*, and the numbers needed to split do not exist.
+Routing the public-use universes into each other through the detailed Census codes (`det2010_pu2010` → `det2010_det2018` → `det2018_pu2018`) shows they do not nest: **58** of the 454 routable 2010-vintage codes land in more than one 2018 public-use code, and those codes hold **16.9%** of 2010-vintage employment.
+Backward recoding means taking one observed 2010 code and dividing its workers among several 2018 codes with nothing to say which worker goes where — probabilistic assignment, which this build exists to avoid (see *Design principles*), and the source of the spurious occupation-switching in the original pipeline.
+A further **30** of the 484 2010-vintage codes (**2.4%** of employment) have no forward route through the crosswalks at all, so they would have to be dropped or hand-assigned.
+And even where a route is clean, the result is a code the CPS never published for those years, which means step C — the validation the rest of the build leans on — has nothing left to check it against.
+
+Collapsing toward `OCC2010` runs the other way: it *merges* rather than splits, and merging needs only employment weights, which we draw from OEWS and CPS.
+Splitting invents information while merging discards it.
+That direction is lossy too — **15** of the 526 2018-vintage codes cover more than one 2010-vintage code, **5.8%** of 2018-vintage employment — which is exactly why the harmonized file has 473 categories rather than 526.
+
+The `OCC2010` route still relies on IPUMS having back-coded post-2020 records, so it is not free of backward mapping.
+IPUMS applies a documented rule to the underlying detailed coding and maintains it across releases; the alternative would have us invent a crosswalk between two already-collapsed public-use universes.
+Step G leans on that by *reading* IPUMS's own collapse off pre-2020 data rather than assuming one.
+
+**Which to use.**
+Cross-sectional work, or anything wholly on one side of 2020, belongs on the per-vintage file, where the detail is.
+Anything crossing the boundary — time series, event studies, `cpsidp`-linked transitions — belongs on `OCC2010`.
+If a specification needs both, run the December→January check in *Suggested diagnostic* before trusting the seam.
 
 ## Why it takes six steps
 
@@ -50,14 +92,14 @@ flowchart TB
     XW["BLS SOC 2010 to 2018<br/>Census code lists<br/>ACS-PUMS-SIPP list"]
     OVR["collapse_overrides<br/>2010 - 2018<br/>hand-maintained"]
     CPSX["IPUMS CPS extract"]
-    MEAS["Felten AIOE<br/>Eisfeldt ESTZ<br/>Eloundou beta"]
+    MEAS["Felten AIOE<br/>Eisfeldt ESTZ<br/>Eloundou beta<br/>Tomlinson applicability"]
   end
 
   A["A - employment weights<br/>emp_soc2018 - emp_soc2010"]
   B["B - code plumbing<br/>soc-soc, soc-det, det-det"]
   C["C - CPS occ universe<br/>codes CPS really publishes"]
   D["D - detailed to public-use<br/>det2018_pu2018 - det2010_pu2010"]
-  E["E - carry each measure<br/>3 measures x 2 vintages"]
+  E["E - carry each measure<br/>4 measures x 2 vintages"]
   F["F - stack, bin, label, report"]
   G["G - re-key on OCC2010<br/>one classification, all years"]
 
@@ -168,6 +210,7 @@ Mapping exposure onto them manufactures occupations that exist in one half of th
 | Felten et al. (2021) AIOE | `AIOE_DataAppendix.xlsx` | SOC 2010 |
 | Eisfeldt et al. (2023) ESTZ | `genaiexp_estz_occscores.csv` | SOC 2010 |
 | Eloundou et al. (2024) β | `gptsRgpts_occ_lvl.csv` | O\*NET-SOC 2018 |
+| Tomlinson et al. (2025) AI applicability | `ai_applicability_scores.csv` | SOC 2018 |
 
 **Out:** `score_*_soc20xx.dta` → `pu_<measure>_<vintage>.dta`
 
@@ -175,6 +218,12 @@ Each score is read natively, bridged across SOC vintages only where the target v
 
 Scores are treated as **intensive** quantities: copied when one source code feeds many targets (an exposure index is not a headcount, so it is not divided up), and employment-weighted-averaged when many sources feed one target.
 A score is never multiplied by a weight, so published scales survive intact.
+
+**One wrinkle in the Tomlinson file.**
+7 of its 785 rows are broad SOC groups rather than detailed codes — `13-1020`, `13-2020`, `29-2010`, `31-1120`, `39-7010`, `47-4090`, `51-2090`.
+Every crosswalk built in B is keyed on detailed SOC, so left alone those rows merge to nothing and their members arrive unscored, and `31-1120` is Home Health and Personal Care Aides — one of the largest occupations in the CPS.
+Each group is therefore expanded to its detailed members with the score **copied**, the same one-source-to-many-targets rule the rest of this step already applies, taking 785 published rows to 793 SOC 2018 codes.
+No detailed member of any of the 7 groups is scored separately in the source file, so nothing explicit is overwritten; the build asserts that.
 
 ## F. Assemble
 
@@ -251,6 +300,10 @@ Aggregates that span the moving boundary — top-two-bins combined, or the conti
 *If this matters for your specification,* use the harmonized file from step G. `ai_exposure_occ2010.dta` keys on IPUMS `OCC2010`, one classification for all years, which gives 5.84% churn and +0.09pp drift — i.e. a normal month.
 Costs occupational detail (473 categories instead of 526).
 Crosswalk-derived common partitions do **not** fix it — the CPS recoding does not respect crosswalk boundaries.
+
+**Tomlinson coverage is slightly thinner than the others.**
+`ai_applic` reaches 476 of 484 codes on the 2010 vintage and 511 of 526 on the 2018 vintage — 98.9% and 98.5% of employment, against ~99% for the rest.
+Its **−0.4pp** break across 2020 is the smallest of any measure in the file.
 
 **The universe window may be narrower than the analysis window.** Check which CPS years feed step C against the years you actually analyse.
 
