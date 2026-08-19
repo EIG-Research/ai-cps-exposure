@@ -329,7 +329,8 @@ No worker is ever randomly reassigned to a new code, so there is no spurious occ
 ## Known limitations
 
 **Residual "all other" occupations are unscored.** Felten's appendix omits 67 of 840 SOC 2010 codes, 30 of them residual categories O\*NET never scored, so codes like `2014` (Social workers, all other) and `4965` (Sales workers, all other) cannot be reached.
-Coverage is ~99% of employment in each vintage; Eisfeldt covers all 840 SOC codes.
+Coverage is ~99% of employment in each vintage, and switching measures does not close the gap: of 841 detailed SOC 2010 codes, Felten scores 774 and Eisfeldt 778, but Eisfeldt reaches only **9** of the codes Felten misses.
+**58 codes are scored by neither**, which is why the residual categories stay unreachable whichever of the two you use.
 
 **Bin membership shifts at the 2020 recoding.** Because the two vintages bin workers on different code universes (483 codes, then 525), the January 2020 recoding moves employment across bins with nobody changing job.
 Person-linked CPS records show **8.0–12.6%** of workers changing bin at the boundary versus **4.8–5.3%** in a normal December→January, depending on the measure, and **5.6–9.9%** of *same-employer* workers against a **2.1–2.3%** control.

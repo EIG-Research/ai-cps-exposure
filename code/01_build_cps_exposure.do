@@ -341,8 +341,11 @@ di as result "   detailed Census 2010 -> 2018: `=_N' pairs"
 *   Whenever you point the pipeline at a different CPS extract -- different
 *   years, different sample, a new IPUMS pull. A code that is genuinely rare and
 *   happens not to appear in a short extract would be treated as "not a CPS
-*   code" and its content routed elsewhere. Over the 2015-2025 window the
-*   thinnest code has 74 observations, so any multi-year extract recovers the
+*   code" and its content routed elsewhere. Over the window set in 0_config.do
+*   ($cps_yr_min-$cps_yr_max) the thinnest code carries well over 50 records --
+*   the build prints the figure for each vintage every run, on the "thinnest
+*   has" line, so read it there rather than trusting a number in a comment.
+*   Any multi-year extract recovers the
 *   same universe; a one-month extract would not.
 *
 * VINTAGE BOUNDARY
@@ -688,9 +691,14 @@ keep soc2010 estz_total estz_core estz_supp
 keep if ustrregexm(soc2010, "^[0-9][0-9]-[0-9][0-9][0-9][0-9]$")
 collapse (mean) estz_total estz_core estz_supp, by(soc2010)
 recast str7 soc2010, force
+* rows read and rows actually SCORED are not the same number here: the file
+* carries all 840 SOC 2010 codes but leaves 62 of them blank. Reporting only
+* _N invites the claim that this measure covers every code, which it does not.
+quietly count if !missing(estz_total)
+local nscored = r(N)
 compress
 save "$prcd_exp/score_eisfeldt_soc2010.dta", replace
-di as result "   Eisfeldt ESTZ: `=_N' SOC 2010 codes"
+di as result "   Eisfeldt ESTZ: `=_N' SOC 2010 codes read, `nscored' with a score"
 
 
 *------------------------------------------------------------------------------*
@@ -707,9 +715,11 @@ keep soc2018 gpt4_beta human_beta
 keep if ustrregexm(soc2018, "^[0-9][0-9]-[0-9][0-9][0-9][0-9]$")
 collapse (mean) gpt4_beta human_beta, by(soc2018)
 recast str7 soc2018, force
+quietly count if !missing(gpt4_beta)
+local nscored = r(N)
 compress
 save "$prcd_exp/score_eloundou_soc2018.dta", replace
-di as result "   Eloundou beta: `=_N' SOC 2018 codes"
+di as result "   Eloundou beta: `=_N' SOC 2018 codes read, `nscored' with a score"
 
 *------------------------------------------------------------------------------*
 * (d) Tomlinson et al. (2025) AI applicability score -- native SOC 2018
@@ -877,8 +887,17 @@ foreach m in felten eisfeldt eloundou tomlinson {
 * NOTE these quintiles hold unequal shares of EMPLOYMENT (in the original build
 * the five AIOE quintiles held 21.8 / 14.1 / 17.9 / 27.2 / 18.9 percent of
 * 2020+ employment). That is inherent to ranking occupation codes rather than
-* workers. Employment-weighted bins are a one-line change: see the commented
-* block at the bottom.
+* workers.
+*
+* For employment-weighted bins instead -- equal shares of WORKERS per bin, not
+* equal counts of occupation codes -- weight the percentile call and nothing
+* else changes:
+*
+*     quietly _pctile `s' if occ_vintage == 2018 & !missing(`s') ///
+*         [aw = emp_share_vintage], nquantiles(5)
+*
+* (An earlier version of this comment promised "the commented block at the
+* bottom". There was no such block; the two lines above are the whole change.)
 *==============================================================================*
 
 di as txt _n "== F  assemble =========================================================="
