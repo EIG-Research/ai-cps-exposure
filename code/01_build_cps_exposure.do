@@ -958,14 +958,18 @@ foreach s of local scorevars {
         local cuts `cuts' `=r(r`q')'
     }
 
-    gen byte `s'_q = .
-    quietly replace `s'_q = 1 if !missing(`s')
+    * name carries the partition: these cutpoints are quintiles of the
+    * 2018-VINTAGE occupation-code distribution, which is not the same partition
+    * as the occ2010 bins in ai_exposure_occ2010.dta. Same measure, same word
+    * "quintile", different cutpoints -- so the two must not share a name.
+    gen byte `s'_q_vintage = .
+    quietly replace `s'_q_vintage = 1 if !missing(`s')
     local qq 2
     foreach c of local cuts {
-        quietly replace `s'_q = `qq' if !missing(`s') & `s' > `c'
+        quietly replace `s'_q_vintage = `qq' if !missing(`s') & `s' > `c'
         local ++qq
     }
-    label var `s'_q "`s' quintile (occ-count ntile, 2018-vintage cutpoints)"
+    label var `s'_q_vintage "`s' quintile, occ-count ntile on 2018-vintage cutpoints"
 }
 
 * ---- labels ------------------------------------------------------------------
@@ -1117,12 +1121,12 @@ foreach s of local scorevars {
     forvalues q = 1/4 {
         local cut`q' = r(r`q')
     }
-    gen byte `s'_q = .
-    quietly replace `s'_q = 1 if !missing(`s')
+    gen byte `s'_q_occ2010 = .
+    quietly replace `s'_q_occ2010 = 1 if !missing(`s')
     forvalues q = 1/4 {
-        quietly replace `s'_q = `q' + 1 if !missing(`s') & `s' > `cut`q''
+        quietly replace `s'_q_occ2010 = `q' + 1 if !missing(`s') & `s' > `cut`q''
     }
-    label var `s'_q "`s' quintile (occ2010 basis, single partition)"
+    label var `s'_q_occ2010 "`s' quintile, occ2010 basis, single partition"
 }
 
 * --- G5. attach the universe, report coverage, save -------------------------

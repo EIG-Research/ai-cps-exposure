@@ -301,6 +301,8 @@ Ties break to the `wtfinl`-modal category, but over this extract there are none:
 
 Two things to know before using it:
 
+- **The bins are a different partition, and are named for it.** This file carries `*_q_occ2010`, cut over occ2010 categories; the per-vintage file carries `*_q_vintage`, cut over 2018-vintage occupation codes.
+  Bin 5 in one is not bin 5 in the other, so never pool or compare them across files.
 - **Every score comes from the 2010-vintage build.** The 2018-vintage columns are not used at all.
   For 2020+ observations IPUMS back-codes `occ2010`, and the worker inherits the 2010-basis score.
   That inheritance is exactly what buys the constant partition.

@@ -1,4 +1,4 @@
-occ_vintage,occ,nobs,emp_share_vintage,nsrc_felten,wtd_felten,aioe,nsrc_eisfeldt,wtd_eisfeldt,estz_total,estz_core,estz_supp,nsrc_eloundou,wtd_eloundou,gpt4_beta,human_beta,nsrc_tomlinson,wtd_tomlinson,ai_applic,aioe_q,estz_total_q,estz_core_q,estz_supp_q,gpt4_beta_q,human_beta_q,ai_applic_q
+occ_vintage,occ,nobs,emp_share_vintage,nsrc_felten,wtd_felten,aioe,nsrc_eisfeldt,wtd_eisfeldt,estz_total,estz_core,estz_supp,nsrc_eloundou,wtd_eloundou,gpt4_beta,human_beta,nsrc_tomlinson,wtd_tomlinson,ai_applic,aioe_q_vintage,estz_total_q_vintage,estz_core_q_vintage,estz_supp_q_vintage,gpt4_beta_q_vintage,human_beta_q_vintage,ai_applic_q_vintage
 2010,10,37662,.010386345171216,1,2,1.334246,2,2,.4256084485540552,.3807130395464898,.0448954018499553,2,2,.482379502044903,.3950927648599152,2,2,.1787325229107262,5,4,5,4,4,4,4
 2010,20,23541,.0064330872770254,1,2,.5748773,1,2,.29411766,.11764706,.17647059,1,2,.4705882352941176,.3823529411764706,1,2,.1098432195788856,4,4,3,5,4,4,2
 2010,40,1297,.0003823154139493,1,2,1.294387,1,2,.36666667,.30000001,.06666667,1,2,.4666666666666666,.5166666666666667,1,2,.1885254605728117,5,4,4,4,4,5,4
