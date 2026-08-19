@@ -357,13 +357,22 @@ di as txt _n "== C  CPS occupation universe ====================================
 *------------------------------------------------------------------------------*
 
 * allows 5 years of data for each vintage
-use year occ wtfinl using "$raw_cps/$cpsfile", clear
+use year occ empstat wtfinl using "$raw_cps/$cpsfile", clear
 quietly summ year
 if r(max) < $cps_yr_max | r(min) > $cps_yr_min {
     di as error "   !! extract does not span $cps_yr_min - $cps_yr_max (found `r(min)'-`r(max)')"
 }
-keep if year>=$cps_yr_min & year<=$cps_yr_max 
-* occ == 0 is "not in universe" (not employed / no occupation reported)
+keep if year>=$cps_yr_min & year<=$cps_yr_max
+
+* EMPLOYED ONLY. occ != 0 on its own keeps people who are not employed but were
+* coded to a last occupation: 5.4% of the weighted mass, and rising from 4.4%
+* (2019) to 9.0% (2020) -- i.e. discontinuously at the vintage boundary. Since
+* this weight defines every coverage figure the build reports AND the weights
+* step G uses to collapse scores onto occ2010, it has to be an employment share.
+* empstat 10 = at work, 12 = has a job, not at work last week.
+keep if inlist(empstat, 10, 12)
+
+* occ == 0 is "not in universe" (no occupation reported)
 drop if occ == 0 | missing(occ)
 
 gen int occ_vintage = cond(year >= 2020, 2018, 2010)
@@ -372,16 +381,16 @@ gen byte one = 1
 collapse (sum) nobs = one (sum) _w = wtfinl, by(occ_vintage occ)
 
 bysort occ_vintage: egen double _tot = total(_w)
-gen double emp_share = _w / _tot
+gen double emp_share_vintage = _w / _tot
 drop _w _tot
 
 label var occ_vintage "2010 = CPS year<=2019, 2018 = CPS year>=2020"
 label var occ         "CPS public-use occupation code (IPUMS OCC)"
 label var nobs        "unweighted CPS records on this code"
-label var emp_share   "share of vintage employment on this code"
+label var emp_share_vintage "share of employed within this code vintage, CPS $cps_yr_min-$cps_yr_max"
 
 sort occ_vintage occ
-order occ_vintage occ nobs emp_share
+order occ_vintage occ nobs emp_share_vintage
 
 * ---- report before overwriting ----------------------------------------------
 foreach v in 2010 2018 {
@@ -902,7 +911,7 @@ use "`v2010'", clear
 append using "`v2018'"
 
 * ---- restrict to codes CPS actually uses -------------------------------------
-merge 1:1 occ_vintage occ using "$prcd_exp/cps_occ_universe.dta", keepusing(nobs emp_share) keep(match using) generate(_inuniv)
+merge 1:1 occ_vintage occ using "$prcd_exp/cps_occ_universe.dta", keepusing(nobs emp_share_vintage) keep(match using) generate(_inuniv)
 * keep(match using) drops any public-use code CPS never uses, and keeps CPS
 * codes that no measure reaches (their scores stay missing and show up in the
 * coverage report). Step D already proved the two universes coincide, so
@@ -944,7 +953,7 @@ foreach s of local scorevars {
 label var occ_vintage "Census occupation code vintage (2010 = CPS <=2019, 2018 = CPS 2020+)"
 label var occ         "CPS public-use occupation code (IPUMS OCC)"
 label var nobs        "CPS unweighted obs on this code (reference)"
-label var emp_share   "share of vintage employment on this code (reference)"
+label var emp_share_vintage "share of employed within this code vintage, CPS $cps_yr_min-$cps_yr_max"
 
 * collapse leaves "(sum) _one" / "(max) _wtd" style labels on the diagnostics
 foreach m of local measures {
@@ -960,7 +969,7 @@ capture label var gpt4_beta  "Eloundou et al. (2024) beta, GPT-4 annotated"
 capture label var human_beta "Eloundou et al. (2024) beta, human annotated"
 capture label var ai_applic  "Tomlinson et al. (2025) AI applicability score"
 
-order occ_vintage occ nobs emp_share
+order occ_vintage occ nobs emp_share_vintage
 sort occ_vintage occ
 compress
 label data "AI exposure by CPS occupation code and code vintage"
@@ -980,7 +989,7 @@ foreach s of local scorevars {
     if _rc continue
     local row
     foreach v in 2010 2018 {
-        quietly summ emp_share if occ_vintage == `v' & !missing(`s')
+        quietly summ emp_share_vintage if occ_vintage == `v' & !missing(`s')
         local cov`v' = 100 * r(sum)
     }
     local brk = `cov2018' - `cov2010'
@@ -998,9 +1007,9 @@ if !_rc {
         di as txt _n "Largest `v'-vintage CPS codes with NO Felten score:"
         preserve
             keep if occ_vintage == `v' & missing(aioe)
-            gsort -emp_share
+            gsort -emp_share_vintage
             if _N > 0 {
-                list occ emp_share nobs in 1/`=min(10, _N)', clean noobs
+                list occ emp_share_vintage nobs in 1/`=min(10, _N)', clean noobs
             }
             else {
                 di as result "   (none)"
@@ -1034,7 +1043,9 @@ local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta ai_appl
 * --- G1. occ(2010 basis) -> occ2010 collapse map, from the CPS itself ---------
 * Pre-2020 occ IS 2010-basis, so this recovers IPUMS's own collapse rule rather
 * than assuming one. Verified deterministic: no occ maps to >1 occ2010 category.
-use year occ occ2010 wtfinl using "$raw_cps/$cpsfile" if year <= 2019, clear
+use year occ occ2010 empstat wtfinl using "$raw_cps/$cpsfile" ///
+    if year >= $cps_yr_min & year <= 2019, clear
+keep if inlist(empstat, 10, 12)
 drop if occ == 0 | missing(occ) | occ2010 == 9999 | missing(occ2010)
 collapse (sum) w = wtfinl, by(occ occ2010)
 bysort occ: gen byte _nh = _N
@@ -1048,15 +1059,20 @@ rename occ occ2010basis
 tempfile hmap
 save "`hmap'"
 
-* --- G2. occ2010 universe and employment shares, ALL years -------------------
-use year occ occ2010 wtfinl using "$raw_cps/$cpsfile", clear
+* --- G2. occ2010 universe and employment shares ------------------------------
+* Same window and same employed-only definition as step C, so the two shares
+* differ only in their denominator: within code vintage there, pooled over the
+* whole window here (occ2010 spans both vintages by construction).
+use year occ occ2010 empstat wtfinl using "$raw_cps/$cpsfile" ///
+    if year >= $cps_yr_min & year <= $cps_yr_max, clear
+keep if inlist(empstat, 10, 12)
 drop if occ == 0 | missing(occ) | occ2010 == 9999 | missing(occ2010)
 gen byte one = 1
 collapse (sum) nobs = one (sum) _w = wtfinl, by(occ2010)
 egen double _tot = total(_w)
-gen double emp_share = _w / _tot
-keep occ2010 nobs emp_share
-label var emp_share "share of full-window employment on this occ2010 category"
+gen double emp_share_pooled = _w / _tot
+keep occ2010 nobs emp_share_pooled
+label var emp_share_pooled "share of employed pooled over CPS $cps_yr_min-$cps_yr_max"
 compress
 save "$prcd_exp/cps_occ2010_universe.dta", replace
 
@@ -1068,9 +1084,11 @@ merge 1:1 occ2010basis using "`hmap'", keep(master match) generate(_mh)
 quietly count if _mh == 1
 if r(N) > 0 di as error "   !! `r(N)' 2010-basis code(s) with no occ2010 mapping"
 drop _mh
-keep occ2010 emp_share `scorevars'
+* weights are step C's WITHIN-VINTAGE share, carried in the finished file --
+* not G2's pooled share, which is attached later as a reference column
+keep occ2010 emp_share_vintage `scorevars'
 drop if missing(occ2010)
-collapse (mean) `scorevars' [aw = emp_share], by(occ2010)
+collapse (mean) `scorevars' [aw = emp_share_vintage], by(occ2010)
 
 * --- G4. bins computed ONCE over occ2010 categories --------------------------
 * One classification -> one set of bins -> membership cannot move at 2020.
@@ -1091,7 +1109,7 @@ foreach s of local scorevars {
 merge 1:1 occ2010 using "$prcd_exp/cps_occ2010_universe.dta",  keep(match using) generate(_mu)
 quietly count if _mu == 2
 local nogap = r(N)
-quietly summ emp_share if _mu == 2
+quietly summ emp_share_pooled if _mu == 2
 di as result "   occ2010 categories with no score: `nogap' (" %5.2f `=100*r(sum)' "% of employment)"
 drop _mu
 label var occ2010 "IPUMS OCC2010 (harmonized, all years)"
