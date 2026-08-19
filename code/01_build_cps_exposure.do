@@ -32,6 +32,7 @@
 * MEASURES  Felten et al. (2021) AIOE          [SOC 2010, + ability-level]
 *           Eloundou et al. (2024) gpt4/human beta  [O*NET-SOC 2018]
 *           Eisfeldt et al. (2023) ESTZ core/total/supplemental [SOC 2010]
+*           Tomlinson et al. (2025) AI applicability score  [SOC 2018]
 *
 * PREVIOUSLY
 *    (1) Census publishes its occupation classification at two levels of detail 
@@ -611,6 +612,7 @@ restore
 *   Eisfeldt ESTZ    same as Felten (also native SOC 2010)
 *   Eloundou beta    SOC2018 -> det2018 -> pu2018          (2018 vintage)
 *                    SOC2018 -> SOC2010 -> det2010 -> pu2010 (2010 vintage)
+*   Tomlinson applic same as Eloundou (also native SOC 2018)
 *
 * Every hop uses xwalk_score: score copied when one source feeds many targets,
 * employment-weighted mean when many sources feed one target. Nothing is ever
@@ -677,6 +679,70 @@ compress
 save "$prcd_exp/score_eloundou_soc2018.dta", replace
 di as result "   Eloundou beta: `=_N' SOC 2018 codes"
 
+*------------------------------------------------------------------------------*
+* (d) Tomlinson et al. (2025) AI applicability score -- native SOC 2018
+*     arXiv:2507.07935. Published at the 6-digit SOC level, so unlike Eloundou
+*     there is no 8-digit O*NET step to average up.
+*
+*     THE BROAD-GROUP CASE. 7 of the 785 rows are broad SOC groups rather than
+*     detailed codes (trailing 0): 13-1020, 13-2020, 29-2010, 31-1120, 39-7010,
+*     47-4090, 51-2090. Every crosswalk built in step 02 is keyed on DETAILED
+*     SOC, so left alone those rows merge to nothing and their members arrive
+*     unscored -- and 31-1120 is Home Health and Personal Care Aides, one of the
+*     largest occupations in the CPS. Each group is therefore expanded to its
+*     detailed members with the score COPIED, which is the one-source-to-many-
+*     targets case xwalk_score already treats this way: an applicability score
+*     is intensive, so it is not divided up. No detailed member of any of the 7
+*     groups is scored separately in the source file, so nothing explicit is
+*     overwritten -- the merge below enforces that, and isid asserts the result.
+*------------------------------------------------------------------------------*
+import delimited using "$raw_aiexp/ai_applicability_scores.csv", varnames(1) clear
+unab vl : _all
+* SOC Code | title | ai_applicability_score
+local vsoc : word 1 of `vl'
+local vsc  : word 3 of `vl'
+
+tostring `vsoc', replace force
+gen str7 soc2018     = strtrim(`vsoc')
+gen double ai_applic = real(string(`vsc'))
+keep soc2018 ai_applic
+keep if ustrregexm(soc2018, "^[0-9][0-9]-[0-9][0-9][0-9][0-9]$") & !missing(ai_applic)
+* guard against duplicate rows in the source file
+collapse (mean) ai_applic, by(soc2018)
+
+* ---- expand broad groups (trailing 0) to their detailed members --------------
+tempfile _tom_detail
+preserve
+    keep if substr(soc2018, 7, 1) != "0"
+    save "`_tom_detail'"
+restore
+keep if substr(soc2018, 7, 1) == "0"
+local n_broad = _N
+
+if `n_broad' > 0 {
+    gen str6 _pfx = substr(soc2018, 1, 6)
+    keep _pfx ai_applic
+    cross using "$prcd_exp/master_soc2018.dta"
+    keep if substr(soc_full, 1, 6) == _pfx
+    rename soc_full soc2018
+    keep soc2018 ai_applic
+    * a detailed code the file scores explicitly always beats an expanded group
+    merge 1:1 soc2018 using "`_tom_detail'", keep(master) nogenerate
+    local n_expanded = _N
+    append using "`_tom_detail'"
+}
+else {
+    local n_expanded = 0
+    use "`_tom_detail'", clear
+}
+
+isid soc2018
+recast str7 soc2018, force
+compress
+save "$prcd_exp/score_tomlinson_soc2018.dta", replace
+di as result "   Tomlinson AI applicability: `=_N' SOC 2018 codes " ///
+    "(`n_broad' broad groups -> `n_expanded' detailed members)"
+
 *==============================================================================*
 * SOC-vintage bridges for the scores that need to cross
 *==============================================================================*
@@ -690,17 +756,21 @@ foreach m in felten eisfeldt {
     save "$prcd_exp/score_`m'_soc2018.dta", replace
 }
 
-* SOC 2018 -> SOC 2010 (for Eloundou on the 2010 vintage)
-use "$prcd_exp/score_eloundou_soc2018.dta", clear
-_xwalk_score gpt4_beta human_beta, source(soc2018) target(soc2010) xwalk("$prcd_exp/soc2010_soc2018.dta") empfile("$prcd_exp/emp_soc2018.dta")
-drop _nsrc _wtd
-save "$prcd_exp/score_eloundou_soc2010.dta", replace
+* SOC 2018 -> SOC 2010 (for Eloundou / Tomlinson on the 2010 vintage)
+foreach m in eloundou tomlinson {
+    use "$prcd_exp/score_`m'_soc2018.dta", clear
+    ds soc2018, not
+    local svars `r(varlist)'
+    _xwalk_score `svars', source(soc2018) target(soc2010) xwalk("$prcd_exp/soc2010_soc2018.dta") empfile("$prcd_exp/emp_soc2018.dta")
+    drop _nsrc _wtd
+    save "$prcd_exp/score_`m'_soc2010.dta", replace
+}
 
 *==============================================================================*
 * SOC -> detailed Census -> CPS public-use, per vintage
 *==============================================================================*
 * ---- 2018 vintage ------------------------------------------------------------
-foreach m in felten eisfeldt eloundou {
+foreach m in felten eisfeldt eloundou tomlinson {
     use "$prcd_exp/score_`m'_soc2018.dta", clear
     ds soc2018, not
     local svars `r(varlist)'
@@ -733,7 +803,7 @@ foreach m in felten eisfeldt eloundou {
 }
 
 * ---- 2010 vintage ------------------------------------------------------------
-foreach m in felten eisfeldt eloundou {
+foreach m in felten eisfeldt eloundou tomlinson {
     use "$prcd_exp/score_`m'_soc2010.dta", clear
     ds soc2010, not
     local svars `r(varlist)'
@@ -781,7 +851,7 @@ foreach m in felten eisfeldt eloundou {
 
 di as txt _n "== 05  assemble =========================================================="
 
-local measures felten eisfeldt eloundou
+local measures felten eisfeldt eloundou tomlinson
 
 * ---- stack -------------------------------------------------------------------
 * MERGE measures WITHIN a vintage, then APPEND the two vintages.
@@ -821,7 +891,7 @@ if r(N) > 0 {
 drop _inuniv
 
 * ---- quintiles: cutpoints from the 2018 vintage, applied to both -------------
-local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta
+local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta ai_applic
 
 foreach s of local scorevars {
     capture confirm variable `s'
@@ -865,6 +935,7 @@ capture label var estz_core  "Eisfeldt et al. (2023) gen-AI exposure, core tasks
 capture label var estz_supp  "Eisfeldt et al. (2023) gen-AI exposure, supplemental"
 capture label var gpt4_beta  "Eloundou et al. (2024) beta, GPT-4 annotated"
 capture label var human_beta "Eloundou et al. (2024) beta, human annotated"
+capture label var ai_applic  "Tomlinson et al. (2025) AI applicability score"
 
 order occ_vintage occ nobs emp_share
 sort occ_vintage occ
@@ -933,7 +1004,7 @@ if !_rc {
 * back-codes. That is the trade -- a consistent rule beats a scheme change.
 *==============================================================================*
 
-local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta
+local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta ai_applic
 
 * --- A1. occ(2010 basis) -> occ2010 collapse map, from the CPS itself ---------
 * Pre-2020 occ IS 2010-basis, so this recovers IPUMS's own collapse rule rather
