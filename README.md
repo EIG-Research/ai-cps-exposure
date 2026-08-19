@@ -22,6 +22,29 @@ merge m:1 occ2010 using "$prcd_data/ai_exposure_occ2010.dta"
 
 ---
 
+## Improvements over previous version
+
+Four differences, in rough order of how much they move results.
+
+**Wildcards mean "remaining", not "all".**
+Census occupation entries often name SOC codes with a placeholder — `49-904X`, `51-91XX` — and the codes that placeholder stands for are the ones *left over* after the list has named its siblings explicitly elsewhere.
+Read as "all", a residual category like "Other production workers" absorbs the very codes the list assigns to their own Census codes, so those SOCs get counted twice and the residual score drifts toward its group average.
+The current build resolves each placeholder per SOC, longest match wins, and asserts what the classification implies: every detailed SOC lands in exactly one Census code.
+This is the largest source of difference, and it lands hardest on the residual "Other …" categories.
+
+**Collapsing is employment-weighted.**
+Where several SOC codes fall into one occupation code, the score is the employment-weighted mean rather than a simple average, so a small specialty no longer counts as much as an occupation many times its size.
+Aggregate exposure barely moves; what moves is which occupations sit near a bin edge.
+
+**Built on the codes the CPS actually publishes.**
+The detailed Census classification contains codes that never appear in the microdata — `1500`, Mining and geological engineers, is valid on paper and absent from CPS — while the CPS publishes collapsed codes that the detailed list does not contain at all.
+Scoring the detailed list and merging it onto CPS therefore invents occupations at one end and leaves real ones unscored at the other.
+Every collapse here is validated against codes observed in the extract.
+
+**Gaps stay visible.**
+An occupation a measure never scored comes through missing rather than as zero or as a silently absent row, so coverage is reportable instead of being quietly folded into the bottom bin.
+Bins are cut over the codes that exist and carry a score, and their names say which partition they came from.
+
 ## Why there are two ways to match to CPS
 
 The two files answer different questions.
