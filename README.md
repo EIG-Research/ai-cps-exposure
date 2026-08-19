@@ -22,25 +22,63 @@ merge m:1 occ2010 using "$prcd_data/ai_exposure_occ2010.dta"
 
 ---
 
+## Improvements over previous version
+
+Four differences, in rough order of how much they move results.
+
+**Wildcards mean "remaining", not "all".**
+Census occupation entries often name SOC codes with a placeholder — `49-904X`, `51-91XX` — and the codes that placeholder stands for are the ones *left over* after the list has named its siblings explicitly elsewhere.
+Read as "all", a residual category like "Other production workers" absorbs the very codes the list assigns to their own Census codes, so those SOCs get counted twice and the residual score drifts toward its group average.
+The current build resolves each placeholder per SOC, longest match wins, and asserts what the classification implies: every detailed SOC lands in exactly one Census code.
+This is the largest source of difference, and it lands hardest on the residual "Other …" categories.
+
+**Collapsing is employment-weighted.**
+Where several SOC codes fall into one occupation code, the score is the employment-weighted mean rather than a simple average, so a small specialty no longer counts as much as an occupation many times its size.
+Aggregate exposure barely moves; what moves is which occupations sit near a bin edge.
+
+**Built on the codes the CPS actually publishes.**
+The detailed Census classification contains codes that never appear in the microdata — `1500`, Mining and geological engineers, is valid on paper and absent from CPS — while the CPS publishes collapsed codes that the detailed list does not contain at all.
+Scoring the detailed list and merging it onto CPS therefore invents occupations at one end and leaves real ones unscored at the other.
+Every collapse here is validated against codes observed in the extract.
+
+**Gaps stay visible.**
+An occupation a measure never scored comes through missing rather than as zero or as a silently absent row, so coverage is reportable instead of being quietly folded into the bottom bin.
+Bins are cut over the codes that exist and carry a score, and their names say which partition they came from.
+
 ## Why there are two ways to match to CPS
 
 The two files answer different questions.
-`ai_exposure_cps.dta` carries the most occupational detail the CPS supports, on the codes it actually published in each year — 484 codes before 2020, 526 from 2020 on.
+`ai_exposure_cps.dta` carries the most occupational detail the CPS supports, on the codes it actually published in each year — 483 codes before 2020, 525 from 2020 on.
 `ai_exposure_occ2010.dta` gives up detail to hold the classification scheme constant.
 
 **Why the `OCC2010` version exists.**
 Bins in the per-vintage file are defined over two different code universes, so the January 2020 recoding moves employment across bins with nobody changing jobs.
-Person-linked records show **11.05%** of workers changing bin at the boundary against **5.37%** in a normal December→January, a **+0.70pp** drift into the top bin, and a largest-monthly-bin-step of **1.65pp**.
-On `OCC2010` — one classification scheme, bins cut once — the same diagnostics read **5.84%**, **+0.09pp**, and **0.52pp**, which is an ordinary month.
+`code/02_boundary_diagnostic.do` measures it, per measure and under both keyings, from `cpsidp`-linked adjacent months (4.7M links, IPUMS month-to-month weights).
+Every measure churns far more at the boundary than in a control December→January, and the sharpest version restricts to workers who report the **same employer** as last month — people who should not change bin at all:
+
+| measure | churn, vintage | churn, `OCC2010` | stayers, vintage | stayers, `OCC2010` | top-bin drift, vintage |
+|---|---|---|---|---|---|
+| `aioe` | 7.99% | 5.50% | 5.58% | 2.83% | −0.34pp |
+| `estz_total` | 11.72% | 5.72% | 9.10% | 2.90% | +2.30pp |
+| `estz_core` | 9.29% | 6.07% | 6.45% | 3.11% | −0.03pp |
+| `estz_supp` | 12.56% | 5.97% | 9.94% | 3.03% | +0.22pp |
+| `gpt4_beta` | 10.92% | 5.51% | 8.24% | 2.71% | +0.68pp |
+| `human_beta` | 10.04% | 5.78% | 7.62% | 3.01% | +0.23pp |
+| `ai_applic` | 12.18% | 5.75% | 9.88% | 2.94% | +0.07pp |
+
+Control December→January steps run 4.8–5.3% for all links and 2.1–2.3% for stayers, under either keying, and control drift never exceeds 0.07pp.
+
+Read the stayer columns first: under the per-vintage keying, 5.6–9.9% of same-employer workers change bin at the boundary against a 2.1–2.3% control, i.e. 2.6× to 4.4× a normal month. Keying on `OCC2010` cuts that to 2.7–3.1%, near the control.
+The residual gap is real occupation change plus IPUMS's own back-coding, not the scheme break.
 Any statistic that spans the boundary inherits the artifact: a monthly series, an event study around 2020, a difference between pre- and post-2020 periods, or a person-level transition rate.
-The cost is 473 categories instead of 526, and post-2020 `OCC2010` values are IPUMS back-codes.
+The cost is 473 categories instead of 525, and post-2020 `OCC2010` values are IPUMS back-codes.
 
 **Why we don't push the 2018 vintage backwards.**
 The obvious alternative is to recode pre-2020 records onto 2018-basis codes and use the 2018-vintage scores for every year.
 That direction requires *splitting*, and the numbers needed to split do not exist.
-Routing the public-use universes into each other through the detailed Census codes (`det2010_pu2010` → `det2010_det2018` → `det2018_pu2018`) shows they do not nest: **58** of the 454 routable 2010-vintage codes land in more than one 2018 public-use code, and those codes hold **16.9%** of 2010-vintage employment.
+Routing the public-use universes into each other through the detailed Census codes (`det2010_pu2010` → `det2010_det2018` → `det2018_pu2018`) shows they do not nest: **58** of the 453 routable 2010-vintage codes land in more than one 2018 public-use code, and those codes hold **16.8%** of 2010-vintage employment.
 Backward recoding means taking one observed 2010 code and dividing its workers among several 2018 codes with nothing to say which worker goes where — probabilistic assignment, which this build exists to avoid (see *Design principles*), and the source of the spurious occupation-switching in the original pipeline.
-A further **30** of the 484 2010-vintage codes (**2.4%** of employment) have no forward route through the crosswalks at all, so they would have to be dropped or hand-assigned.
+A further **30** of the 483 2010-vintage codes (**2.3%** of employment) have no forward route through the crosswalks at all, so they would have to be dropped or hand-assigned.
 And even where a route is clean, the result is a code the CPS never published for those years, which means step C — the validation the rest of the build leans on — has nothing left to check it against.
 
 None of that forbids travelling backwards through the *SOC* codes, and the build does exactly that: Eloundou and Tomlinson are native to SOC 2018, so reaching the 2010 vintage means bridging SOC 2018 → SOC 2010 before the Census hops (do-file, step E).
@@ -50,7 +88,7 @@ The cost is compression, not invention: where that split happens, Eloundou and T
 
 Collapsing toward `OCC2010` runs the other way: it *merges* rather than splits, and merging needs only employment weights, which we draw from OEWS and CPS.
 Splitting invents information while merging discards it.
-That direction is lossy too — **15** of the 526 2018-vintage codes cover more than one 2010-vintage code, **5.8%** of 2018-vintage employment — which is exactly why the harmonized file has 473 categories rather than 526.
+That direction is lossy too — **15** of the 525 2018-vintage codes cover more than one 2010-vintage code, **5.8%** of 2018-vintage employment — which is exactly why the harmonized file has 473 categories rather than 525.
 
 The `OCC2010` route still relies on IPUMS having back-coded post-2020 records, so it is not free of backward mapping.
 IPUMS applies a documented rule to the underlying detailed coding and maintains it across releases; the alternative would have us invent a crosswalk between two already-collapsed public-use universes.
@@ -108,7 +146,7 @@ flowchart TB
   F["F - stack, bin, label, report"]
   G["G - re-key on OCC2010<br/>one classification, all years"]
 
-  OUT1(["ai_exposure_cps.dta<br/>occ_vintage x occ<br/>484 + 526 codes"])
+  OUT1(["ai_exposure_cps.dta<br/>occ_vintage x occ<br/>483 + 525 codes"])
   OUT2(["ai_exposure_occ2010.dta<br/>occ2010<br/>473 categories"])
 
   OEWS --> A
@@ -125,9 +163,9 @@ flowchart TB
   D --> E
   A -.->|"weights many-to-one hops<br/>where OEWS has a row"| E
   E --> F
-  C -->|"universe check + emp_share<br/>(within vintage, 2015-2024)"| F
+  C -->|"universe check +<br/>emp_share_vintage"| F
   F --> OUT1
-  OUT1 -->|"2010-vintage rows;<br/>its emp_share weights G3"| G
+  OUT1 -->|"2010-vintage rows;<br/>emp_share_vintage weights G3"| G
   CPSX -.->|"occ to occ2010 rule (G1),<br/>occ2010 universe (G2)"| G
   G --> OUT2
 ```
@@ -146,7 +184,8 @@ Five edges are worth reading closely:
 - **Measures into B as well as E.** `master_soc2018.dta` and `master_soc2010.dta` are built from the Felten and Eloundou files, and every wildcard expansion in B — plus Tomlinson's broad-group expansion in E — resolves against them.
   A measure file is therefore an input to the code plumbing, not only something the plumbing carries.
 
-Two variables named `emp_share` travel through this graph and they are not the same quantity: step C's is a within-vintage share over CPS 2015-2024 and is what weights G3, while G2's is a share of the whole extract, attached at G5 as a reference column.
+Two employment shares travel through this graph, and they are now named apart: `emp_share_vintage` (step C) is a share within one code vintage and is what weights G3, while `emp_share_pooled` (G2) pools the whole window across both vintages and rides along in the harmonized file as a reference column.
+Both cover CPS `$cps_yr_min`-`$cps_yr_max` and count the employed only.
 
 Note also that G consumes the *finished* `ai_exposure_cps.dta`, and only its 2010-vintage rows.
 Nothing from the 2018 vintage reaches the harmonized file.
@@ -195,6 +234,10 @@ The rule is longest-matching-prefix, resolved **per SOC** so an explicitly named
 **In:** `raw/cps/<extract>.dta`
 **Out:** `cps_occ_universe.dta`, `cps_occ_universe_2010.dta`, `cps_occ_universe_2018.dta`
 
+Built from CPS `$cps_yr_min`-`$cps_yr_max` (the window is set once, in `code/0_config.do`) and from the **civilian employed only** — `empstat` 10 or 12.
+Conditioning on `occ != 0` alone would keep people who are not employed but carry a last-known occupation, which is 5.4% of the weighted mass and rises from 4.4% in 2019 to 9.0% in 2020, i.e. discontinuously at the vintage boundary.
+Armed forces (`empstat` 01) are excluded with them, which is why CPS code `9840` is absent from the universe and the military rows in both override files resolve to "exclude".
+
 The only source that knows which Census codes the CPS actually publishes.
 Detailed `1500` (Mining and geological engineers) is a perfectly valid 2018 Census code, and the official crosswalk maps `1500 → 1500` — but `1500` appears **zero** times in CPS from 2020 on, because those workers sit inside `1520`.
 
@@ -212,9 +255,9 @@ The CPS file is a collapsed version of the detailed Census list: 45 detailed 201
 Mapping exposure onto them manufactures occupations that exist in one half of the sample and not the other.
 
 - **2018 vintage** — from the Census ACS/SIPP public-use code list, whose `Combines:` blocks state exactly which detailed codes sit inside each public-use code.
-  Reproduces the observed CPS universe **exactly (526/526)** apart from the military block, handled by the override file.
+  Reproduces the observed CPS universe **exactly (525/525)**, with the military block excluded through the override file.
 - **2010 vintage** — Census publishes no equivalent list, so three tiers in order: self-map if CPS uses the code; else route `det2010 → det2018 → public-use 2018` and accept if the result is a valid 2010-vintage CPS code; else the hand-reviewable override CSV.
-  Result **484/484**, nothing unmapped.
+  Result **483/483**, nothing unmapped.
 
 ## E. Exposure measures
 
@@ -281,14 +324,19 @@ Ties break to the `wtfinl`-modal category, but over this extract there are none:
 
 Two things to know before using it:
 
+- **The bins are a different partition, and are named for it.** This file carries `*_q_occ2010`, cut over occ2010 categories; the per-vintage file carries `*_q_vintage`, cut over 2018-vintage occupation codes.
+  Bin 5 in one is not bin 5 in the other, so never pool or compare them across files.
 - **Every score comes from the 2010-vintage build.** The 2018-vintage columns are not used at all.
   For 2020+ observations IPUMS back-codes `occ2010`, and the worker inherits the 2010-basis score.
   That inheritance is exactly what buys the constant partition.
-- **Coverage:** 472 of 473 `occ2010` categories carry a score, and the one gap is 0.00% of employment.
+- **Coverage:** 465 of 473 `occ2010` categories carry at least one score; the 8 that carry none hold **0.58%** of employment.
+  Per measure the gap is wider than that: `aioe` is missing for 11 categories (0.76% of employment) and `ai_applic` for 9 (1.33%), the rest for 8 (0.58%).
+  The build prints all three counts, because they are different questions — only **one** category is absent from the collapsed score file altogether, and quoting that number as if it were the coverage gap is how an earlier version of this line came to claim "0.00% of employment".
   One 2010-vintage `occ` code has no `occ2010` mapping and drops out — it appears as `_mh == 1` in the log.
 
-What it buys, from the person-linked diagnostic: **5.84%** of workers change bin at the boundary against **5.37%** in a control December→January, with **+0.09pp** net drift, and the largest monthly bin step falls from **1.65pp** to **0.52pp**.
-The cost is 473 categories instead of 526.
+What it buys, from `code/02_boundary_diagnostic.do`: boundary bin churn falls from 8.0–12.6% to 5.5–6.1% depending on the measure, against a control of 4.8–5.3%, and among same-employer stayers from 5.6–9.9% to 2.7–3.1% against a 2.1–2.3% control.
+Net top-bin drift, which ranges from −0.34pp to +2.30pp across measures under the per-vintage keying, falls to at most 0.30pp.
+The cost is 473 categories instead of 525.
 
 ---
 
@@ -306,18 +354,20 @@ No worker is ever randomly reassigned to a new code, so there is no spurious occ
 ## Known limitations
 
 **Residual "all other" occupations are unscored.** Felten's appendix omits 67 of 840 SOC 2010 codes, 30 of them residual categories O\*NET never scored, so codes like `2014` (Social workers, all other) and `4965` (Sales workers, all other) cannot be reached.
-Coverage is ~99% of employment in each vintage; Eisfeldt covers all 840 SOC codes.
+Coverage is ~99% of employment in each vintage, and switching measures does not close the gap: of 841 detailed SOC 2010 codes, Felten scores 774 and Eisfeldt 778, but Eisfeldt reaches only **9** of the codes Felten misses.
+**58 codes are scored by neither**, which is why the residual categories stay unreachable whichever of the two you use.
 
-**Bin membership shifts at the 2020 recoding.** Because the two vintages bin workers on different code universes (484 codes, then 526), the January 2020 recoding moves employment across bins with nobody changing job.
-Person-linked CPS records show **11.05%** of workers changing bin at the boundary versus **5.37%** in a normal December→January, with a **+0.70pp** net drift into the top bin.
+**Bin membership shifts at the 2020 recoding.** Because the two vintages bin workers on different code universes (483 codes, then 525), the January 2020 recoding moves employment across bins with nobody changing job.
+Person-linked CPS records show **8.0–12.6%** of workers changing bin at the boundary versus **4.8–5.3%** in a normal December→January, depending on the measure, and **5.6–9.9%** of *same-employer* workers against a **2.1–2.3%** control.
+Net top-bin drift is measure-specific and signed in both directions — **+2.30pp** for `estz_total`, **−0.34pp** for `aioe` — so there is no single number for "the drift", and a specification that leans on aggregate direction needs its own measure checked.
 Aggregates that span the moving boundary — top-two-bins combined, or the continuous mean — hide this almost entirely, so check individual bins.
 
-*If this matters for your specification,* use the harmonized file from step G. `ai_exposure_occ2010.dta` keys on IPUMS `OCC2010`, one classification for all years, which gives 5.84% churn and +0.09pp drift — i.e. a normal month.
-Costs occupational detail (473 categories instead of 526).
+*If this matters for your specification,* use the harmonized file from step G. `ai_exposure_occ2010.dta` keys on IPUMS `OCC2010`, one classification for all years, which brings churn to 5.5–6.1% against a 4.8–5.3% control and drift to 0.30pp or less.
+Costs occupational detail (473 categories instead of 525).
 Crosswalk-derived common partitions do **not** fix it — the CPS recoding does not respect crosswalk boundaries.
 
 **Tomlinson coverage is slightly thinner than the others.**
-`ai_applic` reaches 476 of 484 codes on the 2010 vintage and 511 of 526 on the 2018 vintage — 98.9% and 98.5% of employment, against ~99% for the rest.
+`ai_applic` reaches 475 of 483 codes on the 2010 vintage and 511 of 525 on the 2018 vintage — 98.9% and 98.5% of employment, against ~99% for the rest.
 Its **−0.4pp** break across 2020 is the smallest of any measure in the file.
 
 **The universe window may be narrower than the analysis window.** Check which CPS years feed step C against the years you actually analyse.
@@ -327,6 +377,8 @@ Its **−0.4pp** break across 2020 is the smallest of any measure in the file.
 ## Suggested diagnostic
 
 The test that detects a coding artifact is the December→January step in each bin's employment share, **with non-boundary Januaries as the control**.
-Normal years land at 0.11–0.44pp; a coding break shows up as several times that, at exactly `2019m12 → 2020m1`.
+That test is now `code/02_boundary_diagnostic.do`, so run it rather than reconstructing it — and note what it shows: the cross-sectional monthly step is the *weakest* of the three tests.
+For `aioe` the boundary step is 0.14pp while the largest step elsewhere in the series is 2.07pp, so the break is invisible in that statistic even though person-linked churn is plainly elevated.
+Only `estz_total` has its largest monthly step at the boundary (2.48pp against 1.80pp elsewhere).
 Person-level links via `cpsidp` sharpen it further, since a worker whose job did not change should not change bin.
 

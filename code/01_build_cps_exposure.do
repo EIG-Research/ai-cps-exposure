@@ -341,8 +341,11 @@ di as result "   detailed Census 2010 -> 2018: `=_N' pairs"
 *   Whenever you point the pipeline at a different CPS extract -- different
 *   years, different sample, a new IPUMS pull. A code that is genuinely rare and
 *   happens not to appear in a short extract would be treated as "not a CPS
-*   code" and its content routed elsewhere. Over the 2015-2025 window the
-*   thinnest code has 74 observations, so any multi-year extract recovers the
+*   code" and its content routed elsewhere. Over the window set in 0_config.do
+*   ($cps_yr_min-$cps_yr_max) the thinnest code carries well over 50 records --
+*   the build prints the figure for each vintage every run, on the "thinnest
+*   has" line, so read it there rather than trusting a number in a comment.
+*   Any multi-year extract recovers the
 *   same universe; a one-month extract would not.
 *
 * VINTAGE BOUNDARY
@@ -357,13 +360,22 @@ di as txt _n "== C  CPS occupation universe ====================================
 *------------------------------------------------------------------------------*
 
 * allows 5 years of data for each vintage
-use year occ wtfinl using "$raw_cps/$cpsfile", clear
+use year occ empstat wtfinl using "$raw_cps/$cpsfile", clear
 quietly summ year
 if r(max) < $cps_yr_max | r(min) > $cps_yr_min {
     di as error "   !! extract does not span $cps_yr_min - $cps_yr_max (found `r(min)'-`r(max)')"
 }
-keep if year>=$cps_yr_min & year<=$cps_yr_max 
-* occ == 0 is "not in universe" (not employed / no occupation reported)
+keep if year>=$cps_yr_min & year<=$cps_yr_max
+
+* EMPLOYED ONLY. occ != 0 on its own keeps people who are not employed but were
+* coded to a last occupation: 5.4% of the weighted mass, and rising from 4.4%
+* (2019) to 9.0% (2020) -- i.e. discontinuously at the vintage boundary. Since
+* this weight defines every coverage figure the build reports AND the weights
+* step G uses to collapse scores onto occ2010, it has to be an employment share.
+* empstat 10 = at work, 12 = has a job, not at work last week.
+keep if inlist(empstat, 10, 12)
+
+* occ == 0 is "not in universe" (no occupation reported)
 drop if occ == 0 | missing(occ)
 
 gen int occ_vintage = cond(year >= 2020, 2018, 2010)
@@ -372,16 +384,16 @@ gen byte one = 1
 collapse (sum) nobs = one (sum) _w = wtfinl, by(occ_vintage occ)
 
 bysort occ_vintage: egen double _tot = total(_w)
-gen double emp_share = _w / _tot
+gen double emp_share_vintage = _w / _tot
 drop _w _tot
 
 label var occ_vintage "2010 = CPS year<=2019, 2018 = CPS year>=2020"
 label var occ         "CPS public-use occupation code (IPUMS OCC)"
 label var nobs        "unweighted CPS records on this code"
-label var emp_share   "share of vintage employment on this code"
+label var emp_share_vintage "share of employed within this code vintage, CPS $cps_yr_min-$cps_yr_max"
 
 sort occ_vintage occ
-order occ_vintage occ nobs emp_share
+order occ_vintage occ nobs emp_share_vintage
 
 * ---- report before overwriting ----------------------------------------------
 foreach v in 2010 2018 {
@@ -679,9 +691,14 @@ keep soc2010 estz_total estz_core estz_supp
 keep if ustrregexm(soc2010, "^[0-9][0-9]-[0-9][0-9][0-9][0-9]$")
 collapse (mean) estz_total estz_core estz_supp, by(soc2010)
 recast str7 soc2010, force
+* rows read and rows actually SCORED are not the same number here: the file
+* carries all 840 SOC 2010 codes but leaves 62 of them blank. Reporting only
+* _N invites the claim that this measure covers every code, which it does not.
+quietly count if !missing(estz_total)
+local nscored = r(N)
 compress
 save "$prcd_exp/score_eisfeldt_soc2010.dta", replace
-di as result "   Eisfeldt ESTZ: `=_N' SOC 2010 codes"
+di as result "   Eisfeldt ESTZ: `=_N' SOC 2010 codes read, `nscored' with a score"
 
 
 *------------------------------------------------------------------------------*
@@ -698,9 +715,11 @@ keep soc2018 gpt4_beta human_beta
 keep if ustrregexm(soc2018, "^[0-9][0-9]-[0-9][0-9][0-9][0-9]$")
 collapse (mean) gpt4_beta human_beta, by(soc2018)
 recast str7 soc2018, force
+quietly count if !missing(gpt4_beta)
+local nscored = r(N)
 compress
 save "$prcd_exp/score_eloundou_soc2018.dta", replace
-di as result "   Eloundou beta: `=_N' SOC 2018 codes"
+di as result "   Eloundou beta: `=_N' SOC 2018 codes read, `nscored' with a score"
 
 *------------------------------------------------------------------------------*
 * (d) Tomlinson et al. (2025) AI applicability score -- native SOC 2018
@@ -868,8 +887,17 @@ foreach m in felten eisfeldt eloundou tomlinson {
 * NOTE these quintiles hold unequal shares of EMPLOYMENT (in the original build
 * the five AIOE quintiles held 21.8 / 14.1 / 17.9 / 27.2 / 18.9 percent of
 * 2020+ employment). That is inherent to ranking occupation codes rather than
-* workers. Employment-weighted bins are a one-line change: see the commented
-* block at the bottom.
+* workers.
+*
+* For employment-weighted bins instead -- equal shares of WORKERS per bin, not
+* equal counts of occupation codes -- weight the percentile call and nothing
+* else changes:
+*
+*     quietly _pctile `s' if occ_vintage == 2018 & !missing(`s') ///
+*         [aw = emp_share_vintage], nquantiles(5)
+*
+* (An earlier version of this comment promised "the commented block at the
+* bottom". There was no such block; the two lines above are the whole change.)
 *==============================================================================*
 
 di as txt _n "== F  assemble =========================================================="
@@ -902,7 +930,7 @@ use "`v2010'", clear
 append using "`v2018'"
 
 * ---- restrict to codes CPS actually uses -------------------------------------
-merge 1:1 occ_vintage occ using "$prcd_exp/cps_occ_universe.dta", keepusing(nobs emp_share) keep(match using) generate(_inuniv)
+merge 1:1 occ_vintage occ using "$prcd_exp/cps_occ_universe.dta", keepusing(nobs emp_share_vintage) keep(match using) generate(_inuniv)
 * keep(match using) drops any public-use code CPS never uses, and keeps CPS
 * codes that no measure reaches (their scores stay missing and show up in the
 * coverage report). Step D already proved the two universes coincide, so
@@ -930,26 +958,30 @@ foreach s of local scorevars {
         local cuts `cuts' `=r(r`q')'
     }
 
-    gen byte `s'_q = .
-    quietly replace `s'_q = 1 if !missing(`s')
+    * name carries the partition: these cutpoints are quintiles of the
+    * 2018-VINTAGE occupation-code distribution, which is not the same partition
+    * as the occ2010 bins in ai_exposure_occ2010.dta. Same measure, same word
+    * "quintile", different cutpoints -- so the two must not share a name.
+    gen byte `s'_q_vintage = .
+    quietly replace `s'_q_vintage = 1 if !missing(`s')
     local qq 2
     foreach c of local cuts {
-        quietly replace `s'_q = `qq' if !missing(`s') & `s' > `c'
+        quietly replace `s'_q_vintage = `qq' if !missing(`s') & `s' > `c'
         local ++qq
     }
-    label var `s'_q "`s' quintile (occ-count ntile, 2018-vintage cutpoints)"
+    label var `s'_q_vintage "`s' quintile, occ-count ntile on 2018-vintage cutpoints"
 }
 
 * ---- labels ------------------------------------------------------------------
 label var occ_vintage "Census occupation code vintage (2010 = CPS <=2019, 2018 = CPS 2020+)"
 label var occ         "CPS public-use occupation code (IPUMS OCC)"
 label var nobs        "CPS unweighted obs on this code (reference)"
-label var emp_share   "share of vintage employment on this code (reference)"
+label var emp_share_vintage "share of employed within this code vintage, CPS $cps_yr_min-$cps_yr_max"
 
 * collapse leaves "(sum) _one" / "(max) _wtd" style labels on the diagnostics
 foreach m of local measures {
-    capture label var nsrc_`m' "`m': source codes aggregated into this cell"
-    capture label var wtd_`m'  "`m': 1 = employment-weighted, 0 = unweighted"
+    capture label var nsrc_`m' "`m': sources aggregated, FINAL crosswalk hop only"
+    capture label var wtd_`m'  "`m': 2=emp-weighted 1=unwtd fallback 0=unwtd (final hop)"
 }
 
 capture label var aioe       "Felten et al. (2021) AI Occupational Exposure"
@@ -960,7 +992,7 @@ capture label var gpt4_beta  "Eloundou et al. (2024) beta, GPT-4 annotated"
 capture label var human_beta "Eloundou et al. (2024) beta, human annotated"
 capture label var ai_applic  "Tomlinson et al. (2025) AI applicability score"
 
-order occ_vintage occ nobs emp_share
+order occ_vintage occ nobs emp_share_vintage
 sort occ_vintage occ
 compress
 label data "AI exposure by CPS occupation code and code vintage"
@@ -980,7 +1012,7 @@ foreach s of local scorevars {
     if _rc continue
     local row
     foreach v in 2010 2018 {
-        quietly summ emp_share if occ_vintage == `v' & !missing(`s')
+        quietly summ emp_share_vintage if occ_vintage == `v' & !missing(`s')
         local cov`v' = 100 * r(sum)
     }
     local brk = `cov2018' - `cov2010'
@@ -998,9 +1030,9 @@ if !_rc {
         di as txt _n "Largest `v'-vintage CPS codes with NO Felten score:"
         preserve
             keep if occ_vintage == `v' & missing(aioe)
-            gsort -emp_share
+            gsort -emp_share_vintage
             if _N > 0 {
-                list occ emp_share nobs in 1/`=min(10, _N)', clean noobs
+                list occ emp_share_vintage nobs in 1/`=min(10, _N)', clean noobs
             }
             else {
                 di as result "   (none)"
@@ -1013,17 +1045,18 @@ if !_rc {
 *==============================================================================*
 * HARMONIZED occ2010 EXPOSURE FILE
 *
-* Fixes the 2019m12->2020m1 artifact. The per-vintage file bins workers on two
-* different code universes (484 codes, then 526), so the Jan-2020 recoding moves
-* employment across bins with nobody changing job. Person-linked CPS records
-* show 11.05% of workers changing bin at the boundary vs 5.37% in a normal
-* Dec->Jan, with a +0.70pp net drift into bin 5.
+* Addresses the 2019m12->2020m1 artifact. The per-vintage file bins workers on
+* two different code universes (483 codes, then 525), so the Jan-2020 recoding
+* moves employment across bins with nobody changing job.
 *
-* Keying on IPUMS OCC2010 -- one classification, all years -- gives 5.84% churn
-* and +0.09pp drift, i.e. a normal month. Max monthly bin step falls 1.65 ->
-* 0.52pp, inside the range seen in non-boundary Januaries.
+* MEASURED, not asserted: code/02_boundary_diagnostic.do reports boundary bin
+* churn of 8.0-12.6% by measure against a 4.8-5.3% control December->January,
+* and 5.6-9.9% among workers reporting the SAME employer as last month against
+* a 2.1-2.3% control. Keying on OCC2010 brings those to 5.5-6.1% and 2.7-3.1%.
+* Net top-bin drift is measure-specific and signed both ways (+2.30pp for
+* estz_total, -0.34pp for aioe), so do not quote a single drift number.
 *
-* Cost: 474 categories instead of 526, and post-2020 OCC2010 values are IPUMS
+* Cost: 473 categories instead of 525, and post-2020 OCC2010 values are IPUMS
 * back-codes. That is the trade -- a consistent rule beats a scheme change.
 *==============================================================================*
 
@@ -1034,7 +1067,9 @@ local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta ai_appl
 * --- G1. occ(2010 basis) -> occ2010 collapse map, from the CPS itself ---------
 * Pre-2020 occ IS 2010-basis, so this recovers IPUMS's own collapse rule rather
 * than assuming one. Verified deterministic: no occ maps to >1 occ2010 category.
-use year occ occ2010 wtfinl using "$raw_cps/$cpsfile" if year <= 2019, clear
+use year occ occ2010 empstat wtfinl using "$raw_cps/$cpsfile" ///
+    if year >= $cps_yr_min & year <= 2019, clear
+keep if inlist(empstat, 10, 12)
 drop if occ == 0 | missing(occ) | occ2010 == 9999 | missing(occ2010)
 collapse (sum) w = wtfinl, by(occ occ2010)
 bysort occ: gen byte _nh = _N
@@ -1048,15 +1083,20 @@ rename occ occ2010basis
 tempfile hmap
 save "`hmap'"
 
-* --- G2. occ2010 universe and employment shares, ALL years -------------------
-use year occ occ2010 wtfinl using "$raw_cps/$cpsfile", clear
+* --- G2. occ2010 universe and employment shares ------------------------------
+* Same window and same employed-only definition as step C, so the two shares
+* differ only in their denominator: within code vintage there, pooled over the
+* whole window here (occ2010 spans both vintages by construction).
+use year occ occ2010 empstat wtfinl using "$raw_cps/$cpsfile" ///
+    if year >= $cps_yr_min & year <= $cps_yr_max, clear
+keep if inlist(empstat, 10, 12)
 drop if occ == 0 | missing(occ) | occ2010 == 9999 | missing(occ2010)
 gen byte one = 1
 collapse (sum) nobs = one (sum) _w = wtfinl, by(occ2010)
 egen double _tot = total(_w)
-gen double emp_share = _w / _tot
-keep occ2010 nobs emp_share
-label var emp_share "share of full-window employment on this occ2010 category"
+gen double emp_share_pooled = _w / _tot
+keep occ2010 nobs emp_share_pooled
+label var emp_share_pooled "share of employed pooled over CPS $cps_yr_min-$cps_yr_max"
 compress
 save "$prcd_exp/cps_occ2010_universe.dta", replace
 
@@ -1068,9 +1108,11 @@ merge 1:1 occ2010basis using "`hmap'", keep(master match) generate(_mh)
 quietly count if _mh == 1
 if r(N) > 0 di as error "   !! `r(N)' 2010-basis code(s) with no occ2010 mapping"
 drop _mh
-keep occ2010 emp_share `scorevars'
+* weights are step C's WITHIN-VINTAGE share, carried in the finished file --
+* not G2's pooled share, which is attached later as a reference column
+keep occ2010 emp_share_vintage `scorevars'
 drop if missing(occ2010)
-collapse (mean) `scorevars' [aw = emp_share], by(occ2010)
+collapse (mean) `scorevars' [aw = emp_share_vintage], by(occ2010)
 
 * --- G4. bins computed ONCE over occ2010 categories --------------------------
 * One classification -> one set of bins -> membership cannot move at 2020.
@@ -1079,28 +1121,54 @@ foreach s of local scorevars {
     forvalues q = 1/4 {
         local cut`q' = r(r`q')
     }
-    gen byte `s'_q = .
-    quietly replace `s'_q = 1 if !missing(`s')
+    gen byte `s'_q_occ2010 = .
+    quietly replace `s'_q_occ2010 = 1 if !missing(`s')
     forvalues q = 1/4 {
-        quietly replace `s'_q = `q' + 1 if !missing(`s') & `s' > `cut`q''
+        quietly replace `s'_q_occ2010 = `q' + 1 if !missing(`s') & `s' > `cut`q''
     }
-    label var `s'_q "`s' quintile (occ2010 basis, single partition)"
+    label var `s'_q_occ2010 "`s' quintile, occ2010 basis, single partition"
 }
 
 * --- G5. attach the universe, report coverage, save -------------------------
 merge 1:1 occ2010 using "$prcd_exp/cps_occ2010_universe.dta",  keep(match using) generate(_mu)
+
+* Two different things get called "no score" and they are not the same number.
+* (i) categories absent from the collapsed score file entirely (_mu == 2), and
+* (ii) categories that are present but whose score is missing -- which is what a
+* reader of the documentation means. Report BOTH: (i) alone understates the gap
+* by an order of magnitude, and quoting it as if it were (ii) is how the README
+* came to claim "one category, 0.00% of employment".
 quietly count if _mu == 2
-local nogap = r(N)
-quietly summ emp_share if _mu == 2
-di as result "   occ2010 categories with no score: `nogap' (" %5.2f `=100*r(sum)' "% of employment)"
+local norow = r(N)
+quietly summ emp_share_pooled if _mu == 2
+di as result "   occ2010 categories missing from the score file: `norow' (" %5.2f `=100*r(sum)' "% of employment)"
 drop _mu
+
+egen byte _anyscore = rownonmiss(`scorevars')
+quietly count if _anyscore == 0
+local noany = r(N)
+quietly summ emp_share_pooled if _anyscore == 0
+di as result "   occ2010 categories carrying NO score at all:     `noany' (" %5.2f `=100*r(sum)' "% of employment)"
+drop _anyscore
+
+di as txt "   per-measure gaps (categories with a missing score):"
+foreach s of local scorevars {
+    quietly count if missing(`s')
+    local n = r(N)
+    quietly summ emp_share_pooled if missing(`s')
+    di as result "     " %-12s "`s'" %5.0f `n' " of `=_N'  (" %5.2f `=100*r(sum)' "% of employment)"
+}
 label var occ2010 "IPUMS OCC2010 (harmonized, all years)"
 compress
 label data "AI exposure on IPUMS OCC2010 -- single classification, no 2020 break"
 notes drop _dta
 notes _dta : Keyed on IPUMS OCC2010 so occupation coding is constant across the
-notes _dta : Jan-2020 CPS recoding. Boundary bin step 0.52pp vs 1.65pp on the
-notes _dta : per-vintage file; person-linked bin churn 5.84% vs 5.37% control.
+notes _dta : Jan-2020 CPS recoding. Boundary bin churn is 5.5-6.1% by measure
+notes _dta : against a 4.8-5.3% control Dec->Jan, and 2.7-3.1% among same-
+notes _dta : employer workers against a 2.1-2.3% control; on the per-vintage
+notes _dta : file the same figures are 8.0-12.6% and 5.6-9.9%. Reproduce with
+notes _dta : code/02_boundary_diagnostic.do -> output/tables/boundary_diagnostic.csv
+notes _dta : Sample: civilian employed (empstat 10/12), CPS $cps_yr_min-$cps_yr_max.
 save "$prcd_data/ai_exposure_occ2010.dta", replace
 di as result "   wrote ai_exposure_occ2010.dta: `=_N' occ2010 categories"
 
