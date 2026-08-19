@@ -4,10 +4,16 @@
 *           codes that actually appear in CPS microdata, and emit ONE dataset
 *           that merges straight onto a CPS extract.
 *
-* OUTPUT    ai_exposure_cps.dta
+* OUTPUT    ai_exposure_cps.dta (+ .csv)          <- steps A-F
 *             key: occ_vintage (2010 | 2018) + occ
 *             merge:  gen occ_vintage = cond(year >= 2020, 2018, 2010)
 *                     merge m:1 occ_vintage occ using "ai_exposure_cps.dta"
+*
+*           ai_exposure_occ2010.dta                <- step G
+*             key: occ2010 (one classification, all years)
+*             merge:  merge m:1 occ2010 using "ai_exposure_occ2010.dta"
+*             Use this one for anything spanning the Jan-2020 recoding; see
+*             "Why there are two ways to match to CPS" in README.md.
 *
 * DESIGN    Three things this does differently from the original R pipeline:
 *
@@ -20,16 +26,23 @@
 *       Census occupation lists carry codes the CPS never uses (45 in the 2018
 *       vintage, 57 in the 2010 vintage: e.g. 1500 Mining and geological
 *       engineers, which exists in the detailed 2018 list but appears zero
-*       times in CPS from 2020 on). Step 03 collapses detailed -> public-use
-*       and VALIDATES against the codes observed in real CPS data.
+*       times in CPS from 2020 on). Step D collapses detailed -> public-use,
+*       and the two vintages get there differently. The 2018-vintage map comes
+*       from the Census ACS/SIPP public-use list and is then VALIDATED against
+*       the codes observed in CPS (526/526). The 2010 vintage has no published
+*       equivalent, so its map is CONSTRUCTED from the observed codes -- a
+*       detailed code self-maps only if CPS uses it, and a routed target is
+*       accepted only if it is a real CPS code -- then validated afterwards.
+*       Change the step-C universe file and the 2010 map changes with it.
 *
 *   (3) SCORES ARE INTENSIVE. When one source code maps to many targets the
 *       score is COPIED (not divided); when many sources map to one target the
-*       score is an EMPLOYMENT-WEIGHTED MEAN. See ado/xwalk_score.ado. The
+*       score is an EMPLOYMENT-WEIGHTED MEAN. See _xwalk_score in
+*       code/0_config.do. The
 *       original multiplied importance weights twice, which shrank scores by an
 *       occupation-specific factor.
 *
-* MEASURES  Felten et al. (2021) AIOE          [SOC 2010, + ability-level]
+* MEASURES  Felten et al. (2021) AIOE          [SOC 2010]
 *           Eloundou et al. (2024) gpt4/human beta  [O*NET-SOC 2018]
 *           Eisfeldt et al. (2023) ESTZ core/total/supplemental [SOC 2010]
 *           Tomlinson et al. (2025) AI applicability score  [SOC 2018]
@@ -43,8 +56,11 @@
 *    (2) For Eloundou in years >2020, with 2018 vintage occ codes, there were 
 *        37 occ codes in the crosswalk that did not match to CPS and 16 occ in 
 *        CPS that did not get a score from the crosswalk. 
-*    (3) This new vintage has full coverage of all CPS occ codes from 2015 to 
-*        2026.
+*    (3) This new vintage has full coverage of all CPS occ codes from 2015 to
+*        2026. Note that is a COVERAGE claim, not the universe window: step C
+*        builds the code universe from CPS 2015-2024 only (see the filter at
+*        the top of step C). Every code observed in 2025-2026 is already in
+*        that universe, so the narrower window currently drops nothing.
 *==============================================================================*
 
 *--------------------------------------------------
@@ -74,12 +90,15 @@ include 0_config.do
 *   emp_soc2018.dta   from May 2024 OEWS  (SOC 2018)
 *   emp_soc2010.dta   from May 2018 OEWS  (SOC 2010)
 *
-* If a file is absent we still write a stub so downstream code has something to
-* merge, but the stub is empty and xwalk_score() will fall back to unweighted
-* means (and report _wtd == 0 so you can see where that happened).
+* A missing OEWS file is FATAL: _read_oews (code/0_config.do) errors out and the
+* build stops at this step. There is no stub-writing fallback -- an earlier
+* version had one and it was never wired up, so do not rely on the build
+* degrading gracefully to unweighted means here. Where weights are merely
+* MISSING for some SOC codes, _xwalk_score reports _wtd == 0 for targets whose
+* every contributing source lacks employment.
 *==============================================================================*
 
-di as txt _n "== 01  OEWS employment weights =========================================="
+di as txt _n "== A  OEWS employment weights ==========================================="
 
 *------------------------------------------------------------------------------*
 * SOC 2018 basis
@@ -120,7 +139,7 @@ di as result "   SOC 2010: `n' detailed codes, " %12.0fc r(sum) " total employme
 * never mistaken for a wildcard.
 *==============================================================================*
 
-di as txt _n "== 02  SOC / Census crosswalks =========================================="
+di as txt _n "== B  SOC / Census crosswalks ==========================================="
 
 *==============================================================================*
 * (a) SOC 2010 <-> SOC 2018
@@ -312,7 +331,7 @@ di as result "   detailed Census 2010 -> 2018: `=_N' pairs"
 *   vintage, with an unweighted count and an employment share per code.
 *
 * WHY IT MATTERS
-*   This file is LOAD-BEARING, not just a validation target. Step 03 uses it to
+*   This file is LOAD-BEARING, not just a validation target. Step D uses it to
 *   BUILD the 2010-vintage collapse map: a detailed Census code is allowed to
 *   map to itself only if CPS actually uses that code, and a routed target is
 *   accepted only if it is a real CPS code. Change this file and the collapse
@@ -331,17 +350,19 @@ di as result "   detailed Census 2010 -> 2018: `=_N' pairs"
 *   year <= 2019 is the 2010 basis and year >= 2020 is the 2018 basis.
 *==============================================================================*
 
-use "$raw_cps/$cpsfile", clear
-
-di as txt _n "== 00b  regenerate CPS occupation universe ==============================="
+di as txt _n "== C  CPS occupation universe ==========================================="
 
 *------------------------------------------------------------------------------*
 * CPS extract: needs year, occ, and a person weight. Edit if reusing elsewhere.
 *------------------------------------------------------------------------------*
 
 * allows 5 years of data for each vintage
-use year occ wtfinl if year>=2015 & year<=2024 using "$raw_cps/$cpsfile", clear
-
+use year occ wtfinl using "$raw_cps/$cpsfile", clear
+quietly summ year
+if r(max) < $cps_yr_max | r(min) > $cps_yr_min {
+    di as error "   !! extract does not span $cps_yr_min - $cps_yr_max (found `r(min)'-`r(max)')"
+}
+keep if year>=$cps_yr_min & year<=$cps_yr_max 
 * occ == 0 is "not in universe" (not employed / no occupation reported)
 drop if occ == 0 | missing(occ)
 
@@ -370,7 +391,7 @@ foreach v in 2010 2018 {
     di as result "   vintage `v': `n' codes, thinnest has " %6.0f r(min) " obs"
     quietly count if occ_vintage == `v' & nobs < 50
     if r(N) > 0 {
-        di as error "   !! `r(N)' code(s) with <50 observations -- a thin extract" " may be missing codes entirely, which would distort step 03"
+        di as error "   !! `r(N)' code(s) with <50 observations -- a thin extract" " may be missing codes entirely, which would distort step D"
     }
 }
 save "$prcd_exp/cps_occ_universe.dta", replace
@@ -415,6 +436,8 @@ foreach v in 2010 2018 {
 *                  (iii) else take it from raw/collapse_overrides_2010.csv, a
 *                        hand-reviewable table. EDIT THAT FILE, not this one.
 *==============================================================================*
+
+di as txt _n "== D  detailed Census -> CPS public-use codes ==========================="
 
 *==============================================================================*
 * (a) 2018 vintage: parse the ACS/SIPP public-use code list
@@ -467,7 +490,7 @@ preserve
     save "`ov18'"
 restore
 
-merge m:1 det2018 using "`ov18'", nogenerate
+merge m:1 det2018 using "`ov18'", keep(master match) nogenerate
 * override row with a blank target means "drop this detailed code"
 drop if _hasov == 1 & missing(pu_ov)
 replace pu2018 = pu_ov if !missing(pu_ov)
@@ -619,7 +642,7 @@ restore
 * multiplied by a weight, so scores keep their original scale and meaning.
 *==============================================================================*
 
-di as txt _n "== 04  exposure measures ================================================"
+di as txt _n "== E  exposure measures ================================================="
 
 *------------------------------------------------------------------------------*
 * (a) Felten et al. (2021) AIOE -- native SOC 2010
@@ -686,7 +709,7 @@ di as result "   Eloundou beta: `=_N' SOC 2018 codes"
 *
 *     THE BROAD-GROUP CASE. 7 of the 785 rows are broad SOC groups rather than
 *     detailed codes (trailing 0): 13-1020, 13-2020, 29-2010, 31-1120, 39-7010,
-*     47-4090, 51-2090. Every crosswalk built in step 02 is keyed on DETAILED
+*     47-4090, 51-2090. Every crosswalk built in step B is keyed on DETAILED
 *     SOC, so left alone those rows merge to nothing and their members arrive
 *     unscored -- and 31-1120 is Home Health and Personal Care Aides, one of the
 *     largest occupations in the CPS. Each group is therefore expanded to its
@@ -696,7 +719,7 @@ di as result "   Eloundou beta: `=_N' SOC 2018 codes"
 *     groups is scored separately in the source file, so nothing explicit is
 *     overwritten -- the merge below enforces that, and isid asserts the result.
 *------------------------------------------------------------------------------*
-import delimited using "$raw_aiexp/ai_applicability_scores.csv", varnames(1) clear
+import delimited using "$raw_aiexp/ai_applicability_scores.csv", varnames(1) stringcols(_all) clear
 unab vl : _all
 * SOC Code | title | ai_applicability_score
 local vsoc : word 1 of `vl'
@@ -704,7 +727,7 @@ local vsc  : word 3 of `vl'
 
 tostring `vsoc', replace force
 gen str7 soc2018     = strtrim(`vsoc')
-gen double ai_applic = real(string(`vsc'))
+gen double ai_applic = real(`vsc')
 keep soc2018 ai_applic
 keep if ustrregexm(soc2018, "^[0-9][0-9]-[0-9][0-9][0-9][0-9]$") & !missing(ai_applic)
 * guard against duplicate rows in the source file
@@ -849,7 +872,7 @@ foreach m in felten eisfeldt eloundou tomlinson {
 * block at the bottom.
 *==============================================================================*
 
-di as txt _n "== 05  assemble =========================================================="
+di as txt _n "== F  assemble =========================================================="
 
 local measures felten eisfeldt eloundou tomlinson
 
@@ -882,11 +905,11 @@ append using "`v2018'"
 merge 1:1 occ_vintage occ using "$prcd_exp/cps_occ_universe.dta", keepusing(nobs emp_share) keep(match using) generate(_inuniv)
 * keep(match using) drops any public-use code CPS never uses, and keeps CPS
 * codes that no measure reaches (their scores stay missing and show up in the
-* coverage report). Step 03 already proved the two universes coincide, so
+* coverage report). Step D already proved the two universes coincide, so
 * nothing should be dropped here -- but assert it rather than assume it.
 quietly count if _inuniv == 1
 if r(N) > 0 {
-    di as error "   !! `r(N)' exposure rows are not CPS codes -- check step 03"
+    di as error "   !! `r(N)' exposure rows are not CPS codes -- check step D"
 }
 drop _inuniv
 
@@ -1004,9 +1027,11 @@ if !_rc {
 * back-codes. That is the trade -- a consistent rule beats a scheme change.
 *==============================================================================*
 
+di as txt _n "== G  harmonized OCC2010 file ==========================================="
+
 local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta ai_applic
 
-* --- A1. occ(2010 basis) -> occ2010 collapse map, from the CPS itself ---------
+* --- G1. occ(2010 basis) -> occ2010 collapse map, from the CPS itself ---------
 * Pre-2020 occ IS 2010-basis, so this recovers IPUMS's own collapse rule rather
 * than assuming one. Verified deterministic: no occ maps to >1 occ2010 category.
 use year occ occ2010 wtfinl using "$raw_cps/$cpsfile" if year <= 2019, clear
@@ -1023,7 +1048,7 @@ rename occ occ2010basis
 tempfile hmap
 save "`hmap'"
 
-* --- A2. occ2010 universe and employment shares, ALL years -------------------
+* --- G2. occ2010 universe and employment shares, ALL years -------------------
 use year occ occ2010 wtfinl using "$raw_cps/$cpsfile", clear
 drop if occ == 0 | missing(occ) | occ2010 == 9999 | missing(occ2010)
 gen byte one = 1
@@ -1035,7 +1060,7 @@ label var emp_share "share of full-window employment on this occ2010 category"
 compress
 save "$prcd_exp/cps_occ2010_universe.dta", replace
 
-* --- A3. collapse the 2010-vintage scores onto occ2010 -----------------------
+* --- G3. collapse the 2010-vintage scores onto occ2010 -----------------------
 use "$prcd_data/ai_exposure_cps.dta", clear
 keep if occ_vintage == 2010
 rename occ occ2010basis
@@ -1047,10 +1072,10 @@ keep occ2010 emp_share `scorevars'
 drop if missing(occ2010)
 collapse (mean) `scorevars' [aw = emp_share], by(occ2010)
 
-* --- A4. bins computed ONCE over occ2010 categories --------------------------
+* --- G4. bins computed ONCE over occ2010 categories --------------------------
 * One classification -> one set of bins -> membership cannot move at 2020.
 foreach s of local scorevars {
-    quietly _pctile `s', nquantiles(5)
+    quietly _pctile `s' if !missing(`s'), nquantiles(5)
     forvalues q = 1/4 {
         local cut`q' = r(r`q')
     }
@@ -1062,7 +1087,7 @@ foreach s of local scorevars {
     label var `s'_q "`s' quintile (occ2010 basis, single partition)"
 }
 
-* --- A5. attach the universe, report coverage, save -------------------------
+* --- G5. attach the universe, report coverage, save -------------------------
 merge 1:1 occ2010 using "$prcd_exp/cps_occ2010_universe.dta",  keep(match using) generate(_mu)
 quietly count if _mu == 2
 local nogap = r(N)

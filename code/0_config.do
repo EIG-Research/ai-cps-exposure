@@ -14,6 +14,10 @@ global prcd_exp "$prcd_data/intermediate_exposure/"
 
 global cpsfile "cps_00029.dta"
 
+global cps_yr_min = 2015
+global cps_yr_max = 2024
+
+
 * --- Macros ---
 * helper: read one OEWS national file into soc + emp_wt
 capture program drop _read_oews
@@ -69,17 +73,6 @@ program define _read_oews
     }
 end
 
-capture program drop _empty_emp
-program define _empty_emp
-    syntax , SOCVAR(name) OUT(string)
-    quietly {
-        clear
-        set obs 0
-        gen str7 `socvar' = ""
-        gen double emp_wt = .
-        save "`out'", replace
-    }
-end
 
 *==============================================================================*
 * soc_census_map -- detailed SOC -> Census occupation code, 1:1 on SOC
@@ -100,7 +93,7 @@ end
 capture program drop soc_census_map
 program define soc_census_map
     syntax , ID(name) PAT(name) MASTER(string) OUT(string)
-    di "`master'"
+    
     quietly {
         keep `id' `pat'
         replace `pat' = strtrim(upper(`pat'))
@@ -117,7 +110,22 @@ program define soc_census_map
         * most specific claimant
         bysort soc_full: egen byte _best = max(k)
         keep if k == _best
-        * deterministic tie-break
+        * A tie here should be impossible: the Census classification is a
+        * partition of detailed SOCs, so two patterns claiming the same SOC at
+        * equal specificity means the source list is inconsistent or the
+        * wildcard/broad-group expansion mis-parsed it. Report it rather than
+        * letting the tie-break below silently pick one, and resolve it the way
+        * step D resolves its ambiguities -- by hand, in an override file.
+        bysort soc_full `id': gen byte _fid = (_n == 1)
+        bysort soc_full: egen int _nid = total(_fid)
+        quietly count if _nid > 1
+        if r(N) > 0 {
+            noisily di as error "   !! `r(N)' row(s) on SOC(s) with >1 equally-specific Census claimant -- inspect, do not ignore"
+            noisily list soc_full `id' `pat' k if _nid > 1, clean noobs
+        }
+        drop _fid _nid
+
+        * deterministic tie-break (fallback only; see the check above)
         bysort soc_full (`id'): keep if _n == 1
 
         keep soc_full `id'
@@ -128,7 +136,7 @@ program define soc_census_map
 
         levelsof `id', local(_i1)
         local d = `: word count `_i0'' - `: word count `_i1''
-        noisily di as result "   soc_census_map: `=_N' pairs, 1:1 on SOC" _n "                   `d' Census
+        noisily di as result "   soc_census_map: `=_N' pairs, 1:1 on SOC" _n "`d' Census"
     }
 end
 
@@ -196,11 +204,17 @@ program define _xwalk_score
                 exit 111
             }
             replace emp_wt = . if emp_wt <= 0
-            * if no contributing source in a target has employment, weight equally
-            bysort `target': egen double `totemp' = total(emp_wt)
+
+            * a group is fully weighted only if EVERY contributor has employment
+            bysort `target': egen double `totemp'  = total(emp_wt)
+            bysort `target': egen byte   _nmiss    = total(missing(emp_wt))
+            replace _wtd = 2 if `totemp' > 0 & !missing(`totemp') & _nmiss == 0
+            replace _wtd = 1 if `totemp' > 0 & !missing(`totemp') & _nmiss > 0
+            * partially-weighted group: fall back to an unweighted mean rather
+            * than assigning a near-zero weight to the unmeasured contributors
+            bysort `target': replace emp_wt = 1 if _nmiss > 0
             replace emp_wt = 1 if missing(emp_wt)
-            replace _wtd = (`totemp' > 0) & !missing(`totemp')
-            drop `totemp'
+            drop `totemp' _nmiss
         }
         else {
             gen double emp_wt = 1

@@ -43,6 +43,11 @@ Backward recoding means taking one observed 2010 code and dividing its workers a
 A further **30** of the 484 2010-vintage codes (**2.4%** of employment) have no forward route through the crosswalks at all, so they would have to be dropped or hand-assigned.
 And even where a route is clean, the result is a code the CPS never published for those years, which means step C — the validation the rest of the build leans on — has nothing left to check it against.
 
+None of that forbids travelling backwards through the *SOC* codes, and the build does exactly that: Eloundou and Tomlinson are native to SOC 2018, so reaching the 2010 vintage means bridging SOC 2018 → SOC 2010 before the Census hops (do-file, step E).
+The distinction is what is being moved.
+Backward recoding of CPS public-use codes would divide *workers* among codes the CPS never published for those years; a backward SOC bridge moves *scores*, which are intensive, so a SOC 2018 code that splits into several SOC 2010 codes hands each of them the same score rather than a share of anything.
+The cost is compression, not invention: where that split happens, Eloundou and Tomlinson carry identical values across the resulting 2010-basis codes.
+
 Collapsing toward `OCC2010` runs the other way: it *merges* rather than splits, and merging needs only employment weights, which we draw from OEWS and CPS.
 Splitting invents information while merging discards it.
 That direction is lossy too — **15** of the 526 2018-vintage codes cover more than one 2010-vintage code, **5.8%** of 2018-vintage employment — which is exactly why the harmonized file has 473 categories rather than 526.
@@ -83,7 +88,7 @@ It does not help build that file; it rebuilds the finished scores on a single oc
 ## How the steps depend on each other
 
 The table above is the reading order.
-The dependency graph is not the same shape: A feeds sideways into every aggregation rather than into the next step, and the one edge that cannot be reordered is C into D.
+The dependency graph is not the same shape: A feeds sideways into every aggregation rather than into the next step, and D cannot be reordered ahead of either B or C.
 
 ```mermaid
 flowchart TB
@@ -112,26 +117,36 @@ flowchart TB
   OVR --> D
   CPSX --> C
   MEAS --> E
+  MEAS -->|"master SOC lists =<br/>wildcard expansion targets"| B
 
+  B -->|"det universe and<br/>the 2010-to-2018 route"| D
   C ==>|"builds the 2010 collapse map,<br/>so C must run before D"| D
   B --> E
   D --> E
-  A -.->|"weights every<br/>many-to-one hop"| E
+  A -.->|"weights many-to-one hops<br/>where OEWS has a row"| E
   E --> F
-  C -->|"universe check<br/>and emp_share"| F
+  C -->|"universe check + emp_share<br/>(within vintage, 2015-2024)"| F
   F --> OUT1
-  OUT1 --> G
-  CPSX -.->|"occ to occ2010 rule,<br/>read off CPS 2019 and earlier"| G
+  OUT1 -->|"2010-vintage rows;<br/>its emp_share weights G3"| G
+  CPSX -.->|"occ to occ2010 rule (G1),<br/>occ2010 universe (G2)"| G
   G --> OUT2
 ```
 
-Three edges are worth reading closely:
+Five edges are worth reading closely:
 
+- **B into D, twice over.** An ordinary data dependency, but easy to miss: `soc2010_det2010.dta` supplies the entire population of detailed 2010 codes that D is trying to map, and `det2010_det2018.dta` is tier (ii)'s routing table.
+  Re-running B alone therefore *does* change D's output, and with it the 2010 collapse map.
 - **Thick, C into D.** Not a data handoff but a construction dependency: D *builds* the 2010 collapse map against the observed CPS code list.
   Swap the order and the map silently changes.
+  Because every step writes to `intermediate_exposure/` with `replace`, running D out of order does not necessarily fail — it may quietly map whatever stale universe is on disk.
 - **Dashed, into E and G.** Side inputs, not stages.
-  A supplies the weights consumed at every many-to-one hop inside E; the CPS extract is read a second time in G to recover IPUMS's own `occ -> occ2010` collapse.
+  A supplies the weights consumed at the many-to-one hops inside E — though 48 of 867 SOC 2018 codes and 45 of 841 SOC 2010 codes have no OEWS row, so not every hop is actually weighted.
+  The CPS extract is read again in G, twice: once over `year <= 2019` to recover IPUMS's own `occ -> occ2010` collapse (G1), and once over all years to build the `occ2010` universe (G2).
 - **C into F as well as D.** The same file does double duty: it constructs the map in D, then supplies the employment shares the coverage report needs in F.
+- **Measures into B as well as E.** `master_soc2018.dta` and `master_soc2010.dta` are built from the Felten and Eloundou files, and every wildcard expansion in B — plus Tomlinson's broad-group expansion in E — resolves against them.
+  A measure file is therefore an input to the code plumbing, not only something the plumbing carries.
+
+Two variables named `emp_share` travel through this graph and they are not the same quantity: step C's is a within-vintage share over CPS 2015-2024 and is what weights G3, while G2's is a share of the whole extract, attached at G5 as a reference column.
 
 Note also that G consumes the *finished* `ai_exposure_cps.dta`, and only its 2010-vintage rows.
 Nothing from the 2018 vintage reaches the harmonized file.
@@ -146,7 +161,6 @@ Nothing from the 2018 vintage reaches the harmonized file.
 When several SOC codes fall into one Census code, the target's score is their **employment-weighted** mean, not a simple mean, so a 5,000-worker occupation no longer counts as much as a 500,000-worker one.
 
 Column names drift between OEWS vintages (`O_GROUP` vs `OCC_GROUP`); both are handled.
-A missing file is not fatal — that vintage falls back to unweighted means and says so, with `wtd_*` recording where it happened.
 
 ## B. Code plumbing
 
@@ -175,7 +189,6 @@ The wildcard case is the subtle one: `X` means *remaining*, not *all*.
 The rule is longest-matching-prefix, resolved **per SOC** so an explicitly named code always beats a wildcard claiming the same SOC.
 
 *Invariant:* each detailed SOC ends up in exactly one Census code — the Census classification is a partition.
-Asserted with `isid`.
 
 ## C. CPS occupation universe
 
@@ -190,7 +203,9 @@ Rebuild it whenever the CPS extract changes, and record which years feed it — 
 
 ## D. Detailed Census → CPS public-use codes
 
-**In:** `acs_pums_sipp_2018_occ_codes.xlsx` (the `Combines:` blocks), `collapse_overrides_2018.csv`, `collapse_overrides_2010.csv`, `det2010_det2018.dta`, `cps_occ_universe_*.dta`
+**In:** `acs_pums_sipp_2018_occ_codes.xlsx` (the `Combines:` blocks), `collapse_overrides_2018.csv`, `collapse_overrides_2010.csv`, `soc2010_det2010.dta`, `det2010_det2018.dta`, `cps_occ_universe_*.dta`
+
+`soc2010_det2010.dta` — not the raw Census file — is what defines the 538 detailed 2010 codes this step works over, so the tier counts in the log are relative to a step-B artifact.
 **Out:** `det2018_pu2018.dta`, `det2010_pu2010.dta`
 
 The CPS file is a collapsed version of the detailed Census list: 45 detailed 2018 codes and 57 detailed 2010 codes are never used.
@@ -223,7 +238,7 @@ A score is never multiplied by a weight, so published scales survive intact.
 7 of its 785 rows are broad SOC groups rather than detailed codes — `13-1020`, `13-2020`, `29-2010`, `31-1120`, `39-7010`, `47-4090`, `51-2090`.
 Every crosswalk built in B is keyed on detailed SOC, so left alone those rows merge to nothing and their members arrive unscored, and `31-1120` is Home Health and Personal Care Aides — one of the largest occupations in the CPS.
 Each group is therefore expanded to its detailed members with the score **copied**, the same one-source-to-many-targets rule the rest of this step already applies, taking 785 published rows to 793 SOC 2018 codes.
-No detailed member of any of the 7 groups is scored separately in the source file, so nothing explicit is overwritten; the build asserts that.
+No detailed member of any of the 7 groups is scored separately in the source file, so nothing explicit is overwritten.
 
 ## F. Assemble
 
@@ -232,7 +247,7 @@ No detailed member of any of the 7 groups is scored separately in the source fil
 
 - Measures are **merged within** a vintage, then the vintages **appended**.
   The reverse order silently fails: once a score variable exists in the master data, a plain `merge` will not fill it for newly matched rows, so every measure after the first comes through missing for the second vintage.
-- Quintile cutpoints are taken **once** from the 2018-vintage distribution and applied to both, so the thresholds themselves cannot move at 2020.
+- Quintile cutpoints (unweighted) are taken **once** from the 2018-vintage distribution and applied to both, so the thresholds themselves cannot move at 2020.
 - Ends with a coverage report: share of employment carrying a score, per vintage, and the break between them.
 
 ## G. Harmonized `OCC2010` file
