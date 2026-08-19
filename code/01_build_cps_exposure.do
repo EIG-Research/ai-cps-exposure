@@ -948,8 +948,8 @@ label var emp_share   "share of vintage employment on this code (reference)"
 
 * collapse leaves "(sum) _one" / "(max) _wtd" style labels on the diagnostics
 foreach m of local measures {
-    capture label var nsrc_`m' "`m': source codes aggregated into this cell"
-    capture label var wtd_`m'  "`m': 1 = employment-weighted, 0 = unweighted"
+    capture label var nsrc_`m' "`m': sources aggregated, FINAL crosswalk hop only"
+    capture label var wtd_`m'  "`m': 2=emp-weighted 1=unwtd fallback 0=unwtd (final hop)"
 }
 
 capture label var aioe       "Felten et al. (2021) AI Occupational Exposure"
