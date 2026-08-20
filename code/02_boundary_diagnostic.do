@@ -29,6 +29,10 @@
 *                             stayer should not change bin at all
 *               churn_stay_c  the same statistic over control Dec -> Jan steps,
 *                             without which churn_stay cannot be read
+*               ctl_min       lowest per-year control Dec -> Jan churn
+*               ctl_max       highest per-year control Dec -> Jan churn
+*                             (the boundary figure means nothing without the
+*                              spread of the controls it is being compared to)
 *               drift_bnd     change in top-bin employment share across the
 *                             boundary step
 *               drift_ctl     mean of that change over control Dec -> Jan steps
@@ -39,7 +43,17 @@
 * NOTE      Person links use cpsidp and IPUMS's month-to-month longitudinal
 *           weight (lnkfw1mwt), which is the correct weight for adjacent-month
 *           pairs; cross-sectional shares use wtfinl. Sample is the civilian
-*           employed (empstat 10, 12), matching step C of the build.
+*           employed (empstat 10, 12) over the window in 0_config.do, matching
+*           step C of the build.
+*
+*           EMPSAME IS RETROSPECTIVE. It reports whether the respondent worked
+*           for the same employer as at the PREVIOUS month's interview, so the
+*           value that describes a t -> t+1 transition is the one recorded at
+*           t+1, not at t. An earlier version of this script read it at t and
+*           therefore tested the wrong interval, and because EMPSAME is NIU for
+*           month-in-sample 1 and 5 it also forced two of the six rotation
+*           groups to "not a stayer". Both are fixed below; the log reports how
+*           much of the linked sample the restriction actually covers.
 *
 *==============================================================================*
 
@@ -63,7 +77,8 @@ local scorevars aioe estz_total estz_core estz_supp gpt4_beta human_beta ai_appl
 di as txt _n "== 1  build the person-month panel ======================================="
 
 use cpsidp year month occ occ2010 empstat empsame wtfinl lnkfw1mwt ///
-    using "$raw_cps/$cpsfile", clear
+    using "$raw_cps/$cpsfile" ///
+    if year >= $cps_yr_min & year <= $cps_yr_max, clear
 keep if inlist(empstat, 10, 12)
 drop if missing(cpsidp) | cpsidp == 0
 gen int t = ym(year, month)
@@ -124,8 +139,9 @@ foreach k in v h {
 di as txt _n "== 3  adjacent-month person links ======================================="
 
 use "`panel'", clear
-keep cpsidp t v_* h_*
+keep cpsidp t empsame v_* h_*
 rename t tnext
+rename empsame empsame_next          // EMPSAME at t+1 describes the t -> t+1 step
 foreach v of varlist v_* h_* {
     rename `v' n`v'
 }
@@ -142,7 +158,21 @@ di as result "   `=_N' with a positive month-to-month link weight"
 
 gen byte boundary = (t == ym(2019, 12))
 gen byte decjan   = (month == 12)
-gen byte stayer   = (empsame == 2)
+
+* stayer status for the t -> t+1 step comes from EMPSAME as recorded at t+1
+gen byte stayer = (empsame_next == 2)
+
+* how much of the linked sample can the restriction actually speak for?
+foreach grp in boundary "decjan & !boundary" {
+    quietly count if `grp'
+    local nl = r(N)
+    quietly count if `grp' & missing(empsame_next)
+    local nmiss = r(N)
+    quietly count if `grp' & empsame_next == 99
+    local nniu = r(N)
+    quietly count if `grp' & stayer
+    di as result "   `grp': `nl' links, `=`nmiss' + `nniu'' with no EMPSAME answer, `r(N)' stayers"
+}
 
 *==============================================================================*
 * 4. assemble the table
@@ -151,8 +181,8 @@ di as txt _n "== 4  results ====================================================
 
 tempname pf
 tempfile res
-postfile `pf' str12 keying str12 measure double(churn_bnd churn_ctl churn_stay ///
-    churn_stay_c drift_bnd drift_ctl step_bnd step_max_oth) using "`res'", replace
+postfile `pf' str12 keying str12 measure double(churn_bnd churn_ctl ctl_min ctl_max ///
+    churn_stay churn_stay_c drift_bnd drift_ctl step_bnd step_max_oth) using "`res'", replace
 
 foreach k in v h {
     local kn = cond("`k'" == "v", "vintage", "harmonized")
@@ -166,6 +196,21 @@ foreach k in v h {
 
             summ _chg if decjan & !boundary [aw = lnkfw1mwt], meanonly
             local cc = 100 * r(mean)
+
+            * the pooled control mean hides its own spread: report the range of
+            * the individual control Dec -> Jan steps, which is the yardstick the
+            * boundary figure has to clear
+            local cmin = .
+            local cmax = .
+            levelsof t if decjan & !boundary, local(_ctlt)
+            foreach tt of local _ctlt {
+                summ _chg if t == `tt' [aw = lnkfw1mwt], meanonly
+                if r(N) > 0 {
+                    local one = 100 * r(mean)
+                    if `cmin' == . | `one' < `cmin' local cmin = `one'
+                    if `cmax' == . | `one' > `cmax' local cmax = `one'
+                }
+            }
 
             summ _chg if boundary & stayer [aw = lnkfw1mwt], meanonly
             local cs = 100 * r(mean)
@@ -200,7 +245,7 @@ foreach k in v h {
             local sm = r(max)
         restore
 
-        post `pf' ("`kn'") ("`s'") (`cb') (`cc') (`cs') (`csc') (`db') (`dc') (`sb') (`sm')
+        post `pf' ("`kn'") ("`s'") (`cb') (`cc') (`cmin') (`cmax') (`cs') (`csc') (`db') (`dc') (`sb') (`sm')
     }
 }
 postclose `pf'
@@ -209,14 +254,15 @@ postclose `pf'
 * 5. report and save
 *==============================================================================*
 use "`res'", clear
-format churn_* drift_* step_* %6.2f
+format churn_* ctl_* drift_* step_* %6.2f
 
 di as txt _n "{hline 108}"
 di as txt "BOUNDARY DIAGNOSTIC: 2019m12 -> 2020m1 against other December -> January steps"
 di as txt "churn = % of person-month links changing bin; drift/step in percentage points"
 di as txt "{hline 108}"
-list keying measure churn_bnd churn_ctl churn_stay churn_stay_c drift_bnd drift_ctl step_bnd step_max_oth, ///
-    clean noobs
+list keying measure churn_bnd churn_ctl ctl_min ctl_max churn_stay churn_stay_c, clean noobs
+di as txt _n "drift and cross-sectional steps"
+list keying measure drift_bnd drift_ctl step_bnd step_max_oth, clean noobs
 
 capture mkdir "$output/tables"
 export delimited using "$output/tables/boundary_diagnostic.csv", replace
