@@ -368,10 +368,15 @@ if r(max) < $cps_yr_max | r(min) > $cps_yr_min {
 keep if year>=$cps_yr_min & year<=$cps_yr_max
 
 * EMPLOYED ONLY. occ != 0 on its own keeps people who are not employed but were
-* coded to a last occupation: 5.4% of the weighted mass, and rising from 4.4%
-* (2019) to 9.0% (2020) -- i.e. discontinuously at the vintage boundary. Since
-* this weight defines every coverage figure the build reports AND the weights
-* step G uses to collapse scores onto occ2010, it has to be an employment share.
+* coded to a last occupation -- 5.4% of the weighted mass over this window. That
+* share is not stable: by year it runs 5.8, 5.4, 5.0, 4.6, 4.4, 9.1, 6.1, 4.4,
+* 4.3, 4.7 percent, i.e. it tracks the business cycle and balloons through the
+* pandemic. (An earlier version of this comment called the rise "discontinuous
+* at the vintage boundary". It is not: Dec 2019 to Jan 2020 goes 4.07 -> 4.73,
+* and the 2020 spike is COVID, not the recoding.) A weight that swells with
+* unemployment is the problem regardless of where it swells, because this weight
+* defines every coverage figure the build reports AND the weights step G uses to
+* collapse scores onto occ2010, so it has to be an employment share.
 * empstat 10 = at work, 12 = has a job, not at work last week.
 keep if inlist(empstat, 10, 12)
 
@@ -1050,11 +1055,13 @@ if !_rc {
 * moves employment across bins with nobody changing job.
 *
 * MEASURED, not asserted: code/02_boundary_diagnostic.do reports boundary bin
-* churn of 8.0-12.6% by measure against a 4.8-5.3% control December->January,
-* and 5.6-9.9% among workers reporting the SAME employer as last month against
-* a 2.1-2.3% control. Keying on OCC2010 brings those to 5.5-6.1% and 2.7-3.1%.
-* Net top-bin drift is measure-specific and signed both ways (+2.30pp for
-* estz_total, -0.34pp for aioe), so do not quote a single drift number.
+* churn of 8.0-12.6% by measure, against control December->January steps whose
+* per-year range tops out at 5.9%, and 4.5-9.1% among workers reporting the SAME
+* employer as at the previous interview against a 1.2-1.4% control. Keying on
+* OCC2010 brings those to 5.5-6.1% and 1.8-2.2%.
+* Net top-bin drift is largest for estz_total (+2.30pp). The other measures sit
+* below half a point in either direction, which the diagnostic cannot separate
+* from sampling variation, so do not read their sign as a result.
 *
 * Cost: 473 categories instead of 525, and post-2020 OCC2010 values are IPUMS
 * back-codes. That is the trade -- a consistent rule beats a scheme change.
@@ -1164,9 +1171,10 @@ label data "AI exposure on IPUMS OCC2010 -- single classification, no 2020 break
 notes drop _dta
 notes _dta : Keyed on IPUMS OCC2010 so occupation coding is constant across the
 notes _dta : Jan-2020 CPS recoding. Boundary bin churn is 5.5-6.1% by measure
-notes _dta : against a 4.8-5.3% control Dec->Jan, and 2.7-3.1% among same-
-notes _dta : employer workers against a 2.1-2.3% control; on the per-vintage
-notes _dta : file the same figures are 8.0-12.6% and 5.6-9.9%. Reproduce with
+notes _dta : against control Dec->Jan steps ranging to 5.9%, and 1.8-2.2% among
+notes _dta : same-employer workers against a 1.2-1.4% control; on the
+notes _dta : per-vintage file the same figures are 8.0-12.6% and 4.5-9.1%.
+notes _dta : Reproduce with
 notes _dta : code/02_boundary_diagnostic.do -> output/tables/boundary_diagnostic.csv
 notes _dta : Sample: civilian employed (empstat 10/12), CPS $cps_yr_min-$cps_yr_max.
 save "$prcd_data/ai_exposure_occ2010.dta", replace
