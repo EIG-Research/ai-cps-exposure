@@ -20,6 +20,36 @@ merge m:1 occ_vintage occ using "$prcd_data/ai_exposure_cps.dta"
 merge m:1 occ2010 using "$prcd_data/ai_exposure_occ2010.dta"
 ```
 
+### What is in each file
+
+`ai_exposure_cps.dta` (+ `.csv`) — 483 rows on the 2010 vintage, 525 on the 2018 vintage:
+
+| variable | what it is |
+|---|---|
+| `occ_vintage` | which Census code vintage the row describes: 2010 for CPS ≤2019, 2018 for CPS 2020+ |
+| `occ` | CPS public-use occupation code (IPUMS `OCC`) |
+| `aioe` | Felten et al. (2021) AI Occupational Exposure |
+| `estz_total`, `estz_core`, `estz_supp` | Eisfeldt et al. (2023) gen-AI exposure — total, core tasks, supplemental tasks |
+| `gpt4_beta`, `human_beta` | Eloundou et al. (2024) β — GPT-4-annotated and human-annotated |
+| `ai_applic` | Tomlinson et al. (2025) AI applicability score |
+| `*_q_vintage` | quintile of each score. Cutpoints are taken once from the 2018-vintage distribution and applied to both vintages, so the thresholds cannot move at 2020 |
+| `nsrc_<measure>` | how many source codes were aggregated into this cell — **final crosswalk hop only** |
+| `wtd_<measure>` | how that hop was weighted: 2 = employment-weighted, 1 = unweighted fallback (some contributor had no OEWS employment), 0 = unweighted |
+| `nobs` | unweighted CPS records on this code |
+| `emp_share_vintage` | share of civilian employment **within this code vintage**, CPS `$cps_yr_min`–`$cps_yr_max` |
+
+`ai_exposure_occ2010.dta` — 473 rows, one per `OCC2010` category:
+
+| variable | what it is |
+|---|---|
+| `occ2010` | IPUMS `OCC2010`: one occupation classification for every year |
+| the same seven scores | identical names and values to the per-vintage file, collapsed onto `occ2010` from its **2010-vintage rows only** |
+| `*_q_occ2010` | quintile cut over `occ2010` categories. A **different partition** — bin 5 here is not bin 5 in the other file, so never compare bins across the two |
+| `nobs` | unweighted CPS records on this category |
+| `emp_share_pooled` | share of civilian employment **pooled over the whole window**, not within a vintage |
+
+Both files count the civilian employed only (`empstat` 10 or 12). Scores are missing, never zero, for occupations a measure never scored.
+
 ---
 
 ## Improvements over previous version

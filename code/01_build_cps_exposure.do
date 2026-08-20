@@ -1178,6 +1178,7 @@ notes _dta : Reproduce with
 notes _dta : code/02_boundary_diagnostic.do -> output/tables/boundary_diagnostic.csv
 notes _dta : Sample: civilian employed (empstat 10/12), CPS $cps_yr_min-$cps_yr_max.
 save "$prcd_data/ai_exposure_occ2010.dta", replace
+export delimited using "$prcd_data/ai_exposure_occ2010.csv", replace
 di as result "   wrote ai_exposure_occ2010.dta: `=_N' occ2010 categories"
 
 log close
