@@ -20,6 +20,36 @@ merge m:1 occ_vintage occ using "$prcd_data/ai_exposure_cps.dta"
 merge m:1 occ2010 using "$prcd_data/ai_exposure_occ2010.dta"
 ```
 
+### What is in each file
+
+`ai_exposure_cps.dta` (+ `.csv`) — 483 rows on the 2010 vintage, 525 on the 2018 vintage:
+
+| variable | what it is |
+|---|---|
+| `occ_vintage` | which Census code vintage the row describes: 2010 for CPS ≤2019, 2018 for CPS 2020+ |
+| `occ` | CPS public-use occupation code (IPUMS `OCC`) |
+| `aioe` | Felten et al. (2021) AI Occupational Exposure |
+| `estz_total`, `estz_core`, `estz_supp` | Eisfeldt et al. (2023) gen-AI exposure — total, core tasks, supplemental tasks |
+| `gpt4_beta`, `human_beta` | Eloundou et al. (2024) β — GPT-4-annotated and human-annotated |
+| `ai_applic` | Tomlinson et al. (2025) AI applicability score |
+| `*_q_vintage` | quintile of each score. Cutpoints are taken once from the 2018-vintage distribution and applied to both vintages, so the thresholds cannot move at 2020 |
+| `nsrc_<measure>` | how many source codes were aggregated into this cell — **final crosswalk hop only** |
+| `wtd_<measure>` | how that hop was weighted: 2 = employment-weighted, 1 = unweighted fallback (some contributor had no OEWS employment), 0 = unweighted |
+| `nobs` | unweighted CPS records on this code |
+| `emp_share_vintage` | share of civilian employment **within this code vintage**, CPS `$cps_yr_min`–`$cps_yr_max` |
+
+`ai_exposure_occ2010.dta` — 473 rows, one per `OCC2010` category:
+
+| variable | what it is |
+|---|---|
+| `occ2010` | IPUMS `OCC2010`: one occupation classification for every year |
+| the same seven scores | identical names and values to the per-vintage file, collapsed onto `occ2010` from its **2010-vintage rows only** |
+| `*_q_occ2010` | quintile cut over `occ2010` categories. A **different partition** — bin 5 here is not bin 5 in the other file, so never compare bins across the two |
+| `nobs` | unweighted CPS records on this category |
+| `emp_share_pooled` | share of civilian employment **pooled over the whole window**, not within a vintage |
+
+Both files count the civilian employed only (`empstat` 10 or 12). Scores are missing, never zero, for occupations a measure never scored.
+
 ---
 
 ## Improvements over previous version
@@ -58,17 +88,18 @@ Every measure churns far more at the boundary than in a control December→Janua
 
 | measure | churn, vintage | churn, `OCC2010` | stayers, vintage | stayers, `OCC2010` | top-bin drift, vintage |
 |---|---|---|---|---|---|
-| `aioe` | 7.99% | 5.50% | 5.58% | 2.83% | −0.34pp |
-| `estz_total` | 11.72% | 5.72% | 9.10% | 2.90% | +2.30pp |
-| `estz_core` | 9.29% | 6.07% | 6.45% | 3.11% | −0.03pp |
-| `estz_supp` | 12.56% | 5.97% | 9.94% | 3.03% | +0.22pp |
-| `gpt4_beta` | 10.92% | 5.51% | 8.24% | 2.71% | +0.68pp |
-| `human_beta` | 10.04% | 5.78% | 7.62% | 3.01% | +0.23pp |
-| `ai_applic` | 12.18% | 5.75% | 9.88% | 2.94% | +0.07pp |
+| `aioe` | 7.99% | 5.50% | 4.54% | 1.86% | −0.34pp |
+| `estz_total` | 11.72% | 5.72% | 8.37% | 1.97% | +2.30pp |
+| `estz_core` | 9.29% | 6.07% | 5.55% | 2.18% | −0.03pp |
+| `estz_supp` | 12.56% | 5.97% | 9.12% | 2.06% | +0.22pp |
+| `gpt4_beta` | 10.92% | 5.51% | 7.52% | 1.76% | +0.68pp |
+| `human_beta` | 10.04% | 5.78% | 6.64% | 2.06% | +0.23pp |
+| `ai_applic` | 12.18% | 5.75% | 8.85% | 1.93% | +0.07pp |
 
-Control December→January steps run 4.8–5.3% for all links and 2.1–2.3% for stayers, under either keying, and control drift never exceeds 0.07pp.
+The control is every other December→January step, and the diagnostic reports its per-year spread rather than only its mean, because the mean alone will mislead you: control churn runs 4.5–5.9% across years for all links and 1.2–1.4% for stayers.
+Every per-vintage boundary figure sits outside that spread. On `OCC2010`, `ai_applic`'s 5.75% falls *inside* it, so for that measure the harmonized keying leaves nothing distinguishable from a normal month.
 
-Read the stayer columns first: under the per-vintage keying, 5.6–9.9% of same-employer workers change bin at the boundary against a 2.1–2.3% control, i.e. 2.6× to 4.4× a normal month. Keying on `OCC2010` cuts that to 2.7–3.1%, near the control.
+Read the stayer columns first: under the per-vintage keying, 4.5–9.1% of same-employer workers change bin at the boundary against a 1.2–1.4% control — roughly four to seven times a normal month, for people who did not change job. Keying on `OCC2010` cuts that to 1.8–2.2%.
 The residual gap is real occupation change plus IPUMS's own back-coding, not the scheme break.
 Any statistic that spans the boundary inherits the artifact: a monthly series, an event study around 2020, a difference between pre- and post-2020 periods, or a person-level transition rate.
 The cost is 473 categories instead of 525, and post-2020 `OCC2010` values are IPUMS back-codes.
@@ -235,7 +266,8 @@ The rule is longest-matching-prefix, resolved **per SOC** so an explicitly named
 **Out:** `cps_occ_universe.dta`, `cps_occ_universe_2010.dta`, `cps_occ_universe_2018.dta`
 
 Built from CPS `$cps_yr_min`-`$cps_yr_max` (the window is set once, in `code/0_config.do`) and from the **civilian employed only** — `empstat` 10 or 12.
-Conditioning on `occ != 0` alone would keep people who are not employed but carry a last-known occupation, which is 5.4% of the weighted mass and rises from 4.4% in 2019 to 9.0% in 2020, i.e. discontinuously at the vintage boundary.
+Conditioning on `occ != 0` alone would keep people who are not employed but carry a last-known occupation — 5.4% of the weighted mass, and unstable: by year it runs between 4.3% and 9.1%, tracking the business cycle and peaking through the pandemic.
+A weight that swells with unemployment distorts any series built on it, which is reason enough; the earlier claim that it jumped *at* the vintage boundary was wrong (December 2019 to January 2020 moves 4.07% to 4.73%).
 Armed forces (`empstat` 01) are excluded with them, which is why CPS code `9840` is absent from the universe and the military rows in both override files resolve to "exclude".
 
 The only source that knows which Census codes the CPS actually publishes.
@@ -251,7 +283,7 @@ Rebuild it whenever the CPS extract changes, and record which years feed it — 
 `soc2010_det2010.dta` — not the raw Census file — is what defines the 538 detailed 2010 codes this step works over, so the tier counts in the log are relative to a step-B artifact.
 **Out:** `det2018_pu2018.dta`, `det2010_pu2010.dta`
 
-The CPS file is a collapsed version of the detailed Census list: 45 detailed 2018 codes and 57 detailed 2010 codes are never used.
+The CPS file is a collapsed version of the detailed Census list: of 570 detailed 2018 codes, 40 collapse into a different code and 5 have no public-use target at all, so 45 are never used as their own code; of 540 detailed 2010 codes the split is 52 and 5, so 57.
 Mapping exposure onto them manufactures occupations that exist in one half of the sample and not the other.
 
 - **2018 vintage** — from the Census ACS/SIPP public-use code list, whose `Combines:` blocks state exactly which detailed codes sit inside each public-use code.
@@ -332,9 +364,8 @@ Two things to know before using it:
 - **Coverage:** 465 of 473 `occ2010` categories carry at least one score; the 8 that carry none hold **0.58%** of employment.
   Per measure the gap is wider than that: `aioe` is missing for 11 categories (0.76% of employment) and `ai_applic` for 9 (1.33%), the rest for 8 (0.58%).
   The build prints all three counts, because they are different questions — only **one** category is absent from the collapsed score file altogether, and quoting that number as if it were the coverage gap is how an earlier version of this line came to claim "0.00% of employment".
-  One 2010-vintage `occ` code has no `occ2010` mapping and drops out — it appears as `_mh == 1` in the log.
 
-What it buys, from `code/02_boundary_diagnostic.do`: boundary bin churn falls from 8.0–12.6% to 5.5–6.1% depending on the measure, against a control of 4.8–5.3%, and among same-employer stayers from 5.6–9.9% to 2.7–3.1% against a 2.1–2.3% control.
+What it buys, from `code/02_boundary_diagnostic.do`: boundary bin churn falls from 8.0–12.6% to 5.5–6.1% depending on the measure, against control steps that range to 5.9%, and among same-employer stayers from 4.5–9.1% to 1.8–2.2% against a 1.2–1.4% control.
 Net top-bin drift, which ranges from −0.34pp to +2.30pp across measures under the per-vintage keying, falls to at most 0.30pp.
 The cost is 473 categories instead of 525.
 
@@ -358,8 +389,9 @@ Coverage is ~99% of employment in each vintage, and switching measures does not 
 **58 codes are scored by neither**, which is why the residual categories stay unreachable whichever of the two you use.
 
 **Bin membership shifts at the 2020 recoding.** Because the two vintages bin workers on different code universes (483 codes, then 525), the January 2020 recoding moves employment across bins with nobody changing job.
-Person-linked CPS records show **8.0–12.6%** of workers changing bin at the boundary versus **4.8–5.3%** in a normal December→January, depending on the measure, and **5.6–9.9%** of *same-employer* workers against a **2.1–2.3%** control.
-Net top-bin drift is measure-specific and signed in both directions — **+2.30pp** for `estz_total`, **−0.34pp** for `aioe` — so there is no single number for "the drift", and a specification that leans on aggregate direction needs its own measure checked.
+Person-linked CPS records show **8.0–12.6%** of workers changing bin at the boundary against control December→January steps that range to **5.9%** across years, and **4.5–9.1%** of *same-employer* workers against a **1.2–1.4%** control.
+Net top-bin drift is largest by far for `estz_total` (**+2.30pp**).
+The other measures land below half a point in either direction, and the diagnostic reports no standard errors, so those signs should not be read as results — there is no single number for "the drift", and a specification leaning on aggregate direction needs its own measure checked with uncertainty attached.
 Aggregates that span the moving boundary — top-two-bins combined, or the continuous mean — hide this almost entirely, so check individual bins.
 
 *If this matters for your specification,* use the harmonized file from step G. `ai_exposure_occ2010.dta` keys on IPUMS `OCC2010`, one classification for all years, which brings churn to 5.5–6.1% against a 4.8–5.3% control and drift to 0.30pp or less.

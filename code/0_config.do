@@ -163,7 +163,14 @@ end
 *
 * Leaves in memory: one row per target(), plus the score variables, plus
 *   _nsrc     number of source codes that contributed
-*   _wtd      1 if the aggregation was employment-weighted, 0 if unweighted
+*   _wtd      2 every contributing source had OEWS employment, so the target is
+*               a genuine employment-weighted mean
+*             1 at least ONE contributor lacked employment: the whole group
+*               falls back to an UNWEIGHTED mean rather than assigning the
+*               unmeasured sources a near-zero weight
+*             0 no employment file was supplied at all
+*             (note 1 means "not weighted", which is the opposite of what this
+*              header said while the flag was binary)
 *==============================================================================*
 capture program drop _xwalk_score
 program define _xwalk_score
