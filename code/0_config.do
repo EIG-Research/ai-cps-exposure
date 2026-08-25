@@ -31,16 +31,10 @@ global fig "$output/figures/"
 
 * raw inputs, by source. None of these are in the git repo: they ship with the
 * replication bundle. See README.md for where to download it.
-global raw_cps "$raw_data/cps/"          // IPUMS CPS extract (.dta + .xml DDI)
-global raw_xwlk "$raw_data/crosswalks/"  // BLS + Census crosswalks, AND the
-                                         // hand-maintained collapse_overrides_*
-                                         // .csv files -- those are project
-                                         // DECISIONS, not downloads: each row
-                                         // carries a note and a confidence, and
-                                         // step D tells you to edit them rather
-                                         // than the code
-global raw_oews "$raw_data/oews/"        // OEWS national employment, 2 vintages
-global raw_aiexp "$raw_data/ai_exposure/" // the four published measures
+global raw_cps "$raw_data/cps/"
+global raw_xwlk "$raw_data/crosswalks/"
+global raw_oews "$raw_data/oews/"
+global raw_aiexp "$raw_data/ai_exposure/"
 
 * derived data. intermediate_exposure/ holds one checkpoint per crosswalk hop,
 * so any single hop can be audited without rerunning the whole build.
