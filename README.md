@@ -52,6 +52,27 @@ merge m:1 occ2010 using "$prcd_data/ai_exposure_occ2010.dta"
 
 Both files count the civilian employed only (`empstat` 10 or 12). Scores are missing, never zero, for occupations a measure never scored.
 
+### CPS variables required
+
+Nine IPUMS CPS variables, from the **basic monthly** samples. The build needs five of them; the other four are only for the boundary diagnostic.
+
+| variable | needed by | why |
+|---|---|---|
+| `YEAR` | build + diagnostic | assigns the code vintage (`occ_vintage` = 2018 from 2020 on) and applies the `cps_yr_min`–`cps_yr_max` window |
+| `OCC` | build + diagnostic | the CPS public-use occupation code the exposure scores are keyed to |
+| `EMPSTAT` | build + diagnostic | restricts to the civilian employed (10 = at work, 12 = has job, not at work) |
+| `WTFINL` | build + diagnostic | person weight behind every employment share and coverage figure |
+| `OCC2010` | build (step G) + diagnostic | IPUMS's harmonized occupation code — the second output file is keyed on it, and step G learns the `occ → occ2010` collapse from pre-2020 records |
+| `MONTH` | diagnostic only | builds the monthly time index, so the December→January step can be isolated |
+| `CPSIDP` | diagnostic only | person identifier that links the same respondent across adjacent months |
+| `LNKFW1MWT` | diagnostic only | IPUMS month-to-month longitudinal weight, the correct weight for linked pairs |
+| `EMPSAME` | diagnostic only | same-employer question, for the job-stayer restriction. Retrospective — it describes the month *before* the interview — and NIU for month-in-sample 1 and 5 |
+
+Two things to know when pulling your own extract:
+
+- **Sample coverage matters more than variable count.** The window in `code/0_config.do` needs several years either side of January 2020 so both code vintages are populated, and step D builds the 2010 collapse map from whatever occupation codes appear in the extract — so a short extract can quietly change the crosswalk, not just the counts. See **C**.
+- IPUMS adds its own preselected variables (`SERIAL`, `PERNUM`, `HWTFINL` and similar) automatically; nothing here uses them, and the extract this was built from carries a dozen further variables (`AGE`, `SEX`, `EDUC`, `IND`, `UHRSWORKT`, …) that the pipeline never reads. They are harmless, and useful once you start analysing rather than building.
+
 ---
 
 ## Improvements over previous version

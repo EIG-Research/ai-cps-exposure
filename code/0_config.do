@@ -80,9 +80,6 @@ global cps_yr_max = 2024
 *   - TOT_EMP is text: it carries thousands separators, and "*" / "**" mark
 *     suppressed cells. real() turns those into missing, which is what we want --
 *     a suppressed cell is unknown employment, not zero employment.
-*
-* A missing FILE, by contrast, is fatal: the caller stops. There is deliberately
-* no stub-writing fallback (an earlier version had one that was never wired up).
 *==============================================================================*
 capture program drop _read_oews
 program define _read_oews
