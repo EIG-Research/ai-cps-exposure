@@ -1,25 +1,95 @@
 
 
-* --- Paths ---
+*==============================================================================*
+*
+* PURPOSE   Settings and helper programs shared by every script in code/.
+*           Included, not run: both 01_build_cps_exposure.do and
+*           02_boundary_diagnostic.do start with `include 0_config.do'.
+*
+* CONTAINS  paths and globals            (below)
+*           _read_oews                   one OEWS national file -> soc + emp_wt
+*           soc_census_map               detailed SOC -> Census code, 1:1 on SOC
+*           _xwalk_score                 move SCORES between coding schemes
+*
+* NOTE      Nothing here reads or writes project data on its own. Edit the
+*           globals to point the pipeline at a different extract or window;
+*           edit the programs only with a rerun and a diff of the outputs.
+*
+*==============================================================================*
+
+*------------------------------------------------------------------------------*
+* Paths. base_dir is derived from the CURRENT DIRECTORY, so every script must be
+* run from code/ -- which is what run_all.sh does (`cd "$(dirname "$0")"`).
+* Launching a script from the repo root instead silently resolves every path one
+* level too high and the first import fails.
+*------------------------------------------------------------------------------*
 global base_dir "`c(pwd)'/../"
 global raw_data "$base_dir/data/raw/"
 global prcd_data "$base_dir/data/processed/"
 global output "$base_dir/output"
 global fig "$output/figures/"
-global raw_cps "$raw_data/cps/"
-global raw_xwlk "$raw_data/crosswalks/"
-global raw_oews "$raw_data/oews/"
-global raw_aiexp "$raw_data/ai_exposure/"
+
+* raw inputs, by source. None of these are in the git repo: they ship with the
+* replication bundle. See README.md for where to download it.
+global raw_cps "$raw_data/cps/"          // IPUMS CPS extract (.dta + .xml DDI)
+global raw_xwlk "$raw_data/crosswalks/"  // BLS + Census crosswalks, AND the
+                                         // hand-maintained collapse_overrides_*
+                                         // .csv files -- those are project
+                                         // DECISIONS, not downloads: each row
+                                         // carries a note and a confidence, and
+                                         // step D tells you to edit them rather
+                                         // than the code
+global raw_oews "$raw_data/oews/"        // OEWS national employment, 2 vintages
+global raw_aiexp "$raw_data/ai_exposure/" // the four published measures
+
+* derived data. intermediate_exposure/ holds one checkpoint per crosswalk hop,
+* so any single hop can be audited without rerunning the whole build.
 global prcd_exp "$prcd_data/intermediate_exposure/"
 
+*------------------------------------------------------------------------------*
+* The CPS extract. Swapping extracts means changing this line -- and then
+* rebuilding, because step C derives the occupation universe from whatever this
+* points at, and step D CONSTRUCTS the 2010 collapse map from that universe. A
+* different extract can therefore change the crosswalk, not just the counts.
+*------------------------------------------------------------------------------*
 global cpsfile "cps_00029.dta"
 
+*------------------------------------------------------------------------------*
+* The analysis window, set once and used everywhere: step C's universe, both
+* step-G reads, the boundary diagnostic, and the emp_share_* variable labels.
+* Two constraints worth knowing before widening or narrowing it:
+*   - it needs enough years EITHER SIDE of Jan 2020 for both code vintages to be
+*     populated; 5 years each is comfortable
+*   - a code that is genuinely rare and happens not to appear inside the window
+*     is treated as "not a CPS code" and its exposure is routed elsewhere, so a
+*     short window quietly changes the collapse map (see step C)
+* The extract currently runs past cps_yr_max; every occupation code observed in
+* the excluded years is already in the universe, so nothing is being dropped.
+*------------------------------------------------------------------------------*
 global cps_yr_min = 2015
 global cps_yr_max = 2024
 
 
-* --- Macros ---
-* helper: read one OEWS national file into soc + emp_wt
+*==============================================================================*
+* _read_oews -- one OEWS national workbook -> one row per detailed SOC, with the
+* employment figure used as an aggregation weight everywhere downstream.
+*
+* SYNTAX
+*   _read_oews "path/to/national_MYYYY_dl.xlsx", socvar(name) out(filename)
+*
+* Three properties of the source files this has to absorb:
+*   - the group-indicator column is O_GROUP in 2019+ vintages and OCC_GROUP in
+*     older ones. Both are accepted; anything else is a hard error, because
+*     silently keeping the aggregate rows would double-count employment.
+*   - only "detailed" rows are kept. The file also carries total, major, minor
+*     and broad rows, which are sums of the detailed ones.
+*   - TOT_EMP is text: it carries thousands separators, and "*" / "**" mark
+*     suppressed cells. real() turns those into missing, which is what we want --
+*     a suppressed cell is unknown employment, not zero employment.
+*
+* A missing FILE, by contrast, is fatal: the caller stops. There is deliberately
+* no stub-writing fallback (an earlier version had one that was never wired up).
+*==============================================================================*
 capture program drop _read_oews
 program define _read_oews
     syntax anything(name=path), SOCVAR(name) OUT(string)

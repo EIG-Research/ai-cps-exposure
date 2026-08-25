@@ -4,6 +4,8 @@ Carries published AI-exposure measures from their native occupation coding onto 
 
 This improves upon the work in [AI and Jobs: The Final Word (Until the Next One)](https://eig.org/ai-and-jobs-the-final-word/)
 
+Input data can be downloaded HERE.
+
 **Output:** 
 
 `data/processed/ai_exposure_cps.dta` (+ `.csv`), keyed on `occ_vintage` × `occ`.
