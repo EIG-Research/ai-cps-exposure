@@ -4,7 +4,7 @@ Carries published AI-exposure measures from their native occupation coding onto 
 
 This improves upon the work in [AI and Jobs: The Final Word (Until the Next One)](https://eig.org/ai-and-jobs-the-final-word/)
 
-Input data can be downloaded HERE.
+Input data can be downloaded [HERE](https://drive.google.com/drive/folders/1qOz9LUmHqi3Gdbzs1FbyuXv2VxTmx_sv?usp=drive_link).
 
 **Output:** 
 
